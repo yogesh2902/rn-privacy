@@ -102,7 +102,7 @@ export function scanPackage(name: string, pkgDir: string): PackageReport {
     hasBinaryFramework: false,
     apis: new Map(),
     manifestCollected: [],
-    rule: findRule(name),
+    rule: findRule(name, pkg.version),
   };
   if (!report.hasIosNative) return report;
 

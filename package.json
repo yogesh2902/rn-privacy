@@ -1,6 +1,6 @@
 {
   "name": "rn-privacy",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Generate the Apple privacy manifest, App Store privacy labels and Google Play Data safety answers for React Native and Expo apps by scanning your dependencies.",
   "keywords": [
     "react-native",

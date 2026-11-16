@@ -87,6 +87,12 @@ export interface LibraryRule {
   /** npm package names this rule covers. */
   packages: string[];
   name: string;
+  /**
+   * Package versions this rule is for, as a semver range (e.g. ">=6.0.0", "^5.2.0 || ^6.0.0").
+   * Leave it out when the rule is the same for every version. When several rules cover a package,
+   * the first one whose range matches the installed version wins; a rule without a range is the fallback.
+   */
+  versions?: string;
   collects?: CollectedData[];
   accesses?: DeviceAccess[];
   /** Vendor pages the rule is based on. Always check these before submitting. */
