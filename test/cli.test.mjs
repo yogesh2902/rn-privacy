@@ -10,6 +10,8 @@ import { mergeManifest } from '../dist/manifest.js';
 import { analyze } from '../dist/analyze.js';
 import { scanProject } from '../dist/scanner.js';
 import { formatMarkdown } from '../dist/report.js';
+import { findRule } from '../dist/rules.js';
+import { satisfies } from '../dist/semver.js';
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'cli.js');
 const run = (cwd, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
@@ -174,6 +176,63 @@ test('report groups conditionally linked data as linked', () => {
   const linked = md.split('### Data linked to you')[1]?.split('###')[0] ?? '';
   assert.match(linked, /User ID .*@sentry\/react-native\*/);
   assert.match(md, /Google Play Console: Data safety/);
+});
+
+test('expo prebuild: check covers app.json and the generated ios folder', () => {
+  const dir = fixture('prebuild');
+  const apis = [['NSPrivacyAccessedAPICategoryUserDefaults', 'CA92.1'], ['NSPrivacyAccessedAPICategoryDiskSpace', 'E174.1']];
+  const toEntries = (list) => list.map(([t, r]) => ({ NSPrivacyAccessedAPIType: t, NSPrivacyAccessedAPITypeReasons: [r] }));
+  write(dir, {
+    'package.json': { name: 'ExpoApp', dependencies: { expo: '52.0.0', 'lib-a': '1.0.0' } },
+    'app.json': { expo: { name: 'ExpoApp', ios: { privacyManifests: { NSPrivacyAccessedAPITypes: toEntries(apis) } } } },
+    'node_modules/expo/package.json': { name: 'expo', version: '52.0.0' },
+    'node_modules/lib-a/package.json': { name: 'lib-a', version: '1.0.0' },
+    'node_modules/lib-a/ios/A.swift': 'UserDefaults.standard.set(1, forKey: "k")\nlet k: URLResourceKey = .volumeAvailableCapacityKey',
+    'ios/ExpoApp.xcodeproj/project.pbxproj': 'PrivacyInfo.xcprivacy',
+  });
+  assert.equal(scanProject(dir).projectType, 'expo-prebuild');
+
+  // app.json is fine, but prebuild has not written the ios manifest yet.
+  let res = run(dir, 'check');
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /Not generated yet/);
+  assert.match(res.stderr, /npx expo prebuild/);
+
+  // ios manifest generated from an older app.json (missing Disk space).
+  write(dir, { 'ios/ExpoApp/PrivacyInfo.xcprivacy': manifestXml(apis.slice(0, 1)) });
+  res = run(dir, 'check');
+  assert.equal(res.status, 1);
+  assert.match(res.stdout, /app\.json[\s\S]*Covers all 2/);
+  assert.match(res.stderr, /Missing required reason API: Disk space/);
+  assert.match(res.stderr, /out of date/);
+
+  // Both in sync.
+  write(dir, { 'ios/ExpoApp/PrivacyInfo.xcprivacy': manifestXml(apis) });
+  res = run(dir, 'check');
+  assert.equal(res.status, 0, res.stderr);
+});
+
+test('semver ranges', () => {
+  const cases = [
+    ['6.1.0', '>=6.0.0', true], ['5.9.9', '>=6', false], ['6.4.2', '^6.1.0', true], ['7.0.0', '^6.1.0', false],
+    ['0.2.9', '^0.2.3', true], ['0.3.0', '^0.2.3', false], ['6.1.9', '~6.1.0', true], ['6.2.0', '~6.1', false],
+    ['6.9.0', '6.x', true], ['7.0.0', '6', false], ['5.0.0', '<5 || >=6', false], ['6.0.0-beta.1', '>=6.0.0', true],
+    ['4.0.0', '>=3 <5', true], ['5.1.0', '<=5', true], ['6.0.0', '<=5', false], ['1.2.3', '*', true], ['?', '*', false],
+  ];
+  for (const [v, range, want] of cases) assert.equal(satisfies(v, range), want, `${v} in ${range}`);
+});
+
+test('findRule picks the rule for the installed version', () => {
+  const rules = [
+    { packages: ['sdk'], name: 'new', versions: '>=6', sources: [] },
+    { packages: ['sdk'], name: 'old', versions: '<6', sources: [] },
+    { packages: ['sdk'], name: 'any', sources: [] },
+  ];
+  assert.equal(findRule('sdk', '6.2.0', rules).name, 'new');
+  assert.equal(findRule('sdk', '5.0.0', rules).name, 'old');
+  assert.equal(findRule('sdk', '?', rules).name, 'any');
+  assert.equal(findRule('sdk', undefined, rules).name, 'any');
+  assert.equal(findRule('@sentry/react-native', '6.0.0').name, 'Sentry');
 });
 
 test('--help and unknown command', () => {

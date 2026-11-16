@@ -65,7 +65,7 @@ Sensitive data your app can read
 | `scan` (default) | Prints required reason APIs, collected data, sensitive device access and warnings. `--format json` for machines. |
 | `ios` | Shows what it would add to your manifest. `--write` saves it. `--include-conditional` also declares data that is only collected in some setups (e.g. after `Sentry.setUser()`). |
 | `report` | Markdown (or `--format json`) with tables for App Store Connect and Google Play. `-o file.md` to save. |
-| `check` | Exit code 1 if a required reason API category is missing from your manifest. Warns about undeclared data. |
+| `check` | Exit code 1 if a required reason API category is missing from your manifest. Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
 
 All commands accept `--project <dir>` (default: current folder).
 
@@ -78,13 +78,22 @@ All commands accept `--project <dir>` (default: current folder).
 
 Adding a new library that needs a declaration now fails the build instead of the App Store upload.
 
+**Expo with prebuild:** the privacy manifest in `app.json` only reaches the app when `expo prebuild` writes it
+into `ios/`. Run `check` after prebuild in CI to verify what actually ships:
+
+```yaml
+- run: npx expo prebuild --platform ios --no-install
+- run: npx rn-privacy check
+```
+
 ## How it works
 
 1. Reads the `dependencies` in your `package.json` (not `devDependencies`), plus native packages they pull in
    (Expo autolinking links transitive modules too).
 2. For each package with iOS native code, scans `.m`, `.mm`, `.swift` and `.h` files (skipping `example/`,
    tests and Android code) for the symbols Apple lists, and parses any `PrivacyInfo.xcprivacy` it ships.
-3. Looks the package up in the [rules database](src/rules.ts) for the data it collects.
+3. Looks the package up in the [rules database](src/rules.ts) for the data it collects, using the rule for
+   the installed version when a library's data collection changed between versions.
 4. Merges everything into one result.
 
 When a library uses an API but gives no reason, rn-privacy suggests the reason most React Native apps use
@@ -110,6 +119,11 @@ into your app's manifest.
 
 The rules database is the most valuable part of this project. To add or fix a library, edit
 [`src/rules.ts`](src/rules.ts), link the vendor's official disclosure page in `sources`, and run `npm test`.
+
+Required reason APIs are never taken from rules: they come from scanning the installed code, so they always
+match the version you have. Rules only describe **data collection**. If that changed between versions of a
+library, add one rule per range with `versions` (a semver range such as `">=6.0.0"` or `"^5.2.0 || ^6.0.0"`).
+The first rule whose range matches the installed version is used, and a rule without `versions` is the fallback.
 
 ## License
 

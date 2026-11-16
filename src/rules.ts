@@ -1,3 +1,4 @@
+import { satisfies } from './semver.js';
 import type { LibraryRule } from './types.js';
 
 /**
@@ -268,9 +269,12 @@ export const RULES: LibraryRule[] = [
   },
 ];
 
-const byPackage = new Map<string, LibraryRule>();
-for (const rule of RULES) for (const pkg of rule.packages) byPackage.set(pkg, rule);
-
-export function findRule(pkg: string): LibraryRule | undefined {
-  return byPackage.get(pkg);
+/**
+ * The rule for a package. Pass the installed version to pick a version-specific rule:
+ * the first rule whose `versions` range matches wins, and a rule without `versions` is the fallback.
+ */
+export function findRule(pkg: string, version?: string, rules: LibraryRule[] = RULES): LibraryRule | undefined {
+  const candidates = rules.filter((r) => r.packages.includes(pkg));
+  const matched = version ? candidates.find((r) => r.versions && satisfies(version, r.versions)) : undefined;
+  return matched ?? candidates.find((r) => !r.versions);
 }

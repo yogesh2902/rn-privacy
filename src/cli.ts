@@ -11,7 +11,7 @@ import { c, formatMarkdown, formatScan, toJson } from './report.js';
 import { scanProject } from './scanner.js';
 import { DATA_TYPES } from './types.js';
 
-const VERSION = '0.1.1';
+const VERSION = '0.1.2';
 
 const HELP = `${c.bold('rn-privacy')} ${VERSION}
 Privacy manifest and store privacy forms for React Native and Expo apps.
@@ -127,7 +127,7 @@ function main(argv: string[]): number {
 
     case 'check': {
       const declared = readDeclared(projectDir, scan.projectType);
-      if (!declared) {
+      if (!declared.length) {
         const expo = scan.projectType.startsWith('expo') ? findExpoConfig(projectDir) : null;
         if (expo?.dynamic && expo.dynamicMentionsPrivacy) {
           console.error(c.red(`✗ privacyManifests is set in ${path.basename(expo.dynamic)}, which rn-privacy cannot read (it never runs your code).`));
@@ -138,34 +138,84 @@ function main(argv: string[]): number {
         }
         return 1;
       }
-      const have = new Set((declared.NSPrivacyAccessedAPITypes ?? []).map((e) => e.NSPrivacyAccessedAPIType));
-      const missing = analysis.apis.filter((a) => !have.has(a.category));
-      const haveData = new Set((declared.NSPrivacyCollectedDataTypes ?? []).map((e) => e.NSPrivacyCollectedDataType));
-      const missingData = analysis.data.filter((d) => d.packages.length && !haveData.has(DATA_TYPES[d.type].apple));
 
-      for (const d of missingData) print(c.yellow(`! Not declared: ${DATA_TYPES[d.type].label} (collected by ${d.packages.join(', ')})`));
-      if (missing.length) {
-        for (const m of missing) console.error(c.red(`✗ Missing required reason API: ${API_LABELS[m.category]} (used by ${m.packages.join(', ')})`));
-        console.error('\nRun `rn-privacy ios --write` to fix.');
-        return 1;
+      let failed = false;
+      let generatedOutdated = false;
+      let sourceOk = false;
+      const several = declared.length > 1;
+      for (const src of declared) {
+        if (several) print(c.bold(src.label));
+        const pad = several ? '  ' : '';
+        if (!src.manifest) {
+          console.error(c.red(`${pad}✗ Not generated yet. app.json has privacyManifests, but ${src.label} does not exist.`));
+          failed = generatedOutdated = true;
+          continue;
+        }
+        const have = new Set((src.manifest.NSPrivacyAccessedAPITypes ?? []).map((e) => e.NSPrivacyAccessedAPIType));
+        const missing = analysis.apis.filter((a) => !have.has(a.category));
+        const haveData = new Set((src.manifest.NSPrivacyCollectedDataTypes ?? []).map((e) => e.NSPrivacyCollectedDataType));
+        const missingData = analysis.data.filter((d) => d.packages.length && !haveData.has(DATA_TYPES[d.type].apple));
+
+        for (const d of missingData) print(c.yellow(`${pad}! Not declared: ${DATA_TYPES[d.type].label} (collected by ${d.packages.join(', ')})`));
+        for (const m of missing) console.error(c.red(`${pad}✗ Missing required reason API: ${API_LABELS[m.category]} (used by ${m.packages.join(', ')})`));
+        if (missing.length) {
+          failed = true;
+          if (src.generated) generatedOutdated = true;
+        } else {
+          if (!src.generated) sourceOk = true;
+          print(c.green(`${pad}✓ ${several ? 'Covers' : 'Privacy manifest covers'} all ${analysis.apis.length} required reason API categories.`));
+        }
       }
-      return print(c.green(`✓ Privacy manifest covers all ${analysis.apis.length} required reason API categories.`));
+
+      if (!failed) return 0;
+      if (generatedOutdated && sourceOk) {
+        console.error('\napp.json is correct, but the ios folder is out of date with it.');
+        console.error('Run `npx expo prebuild` to regenerate it, or `rn-privacy ios --write` to update both.');
+      } else {
+        console.error('\nRun `rn-privacy ios --write` to fix.');
+      }
+      return 1;
     }
   }
   return 0;
 }
 
-function readDeclared(projectDir: string, type: string): PrivacyManifest | null {
+interface DeclaredSource {
+  label: string;
+  /** null when the file should exist (app.json declares privacy) but prebuild has not created it. */
+  manifest: PrivacyManifest | null;
+  /** true for the ios folder of an Expo prebuild project, which is generated from app.json. */
+  generated?: boolean;
+}
+
+/**
+ * Every privacy manifest the app ships. An Expo prebuild project has two: app.json, and the
+ * PrivacyInfo.xcprivacy that `expo prebuild` writes into ios/. They drift apart when app.json
+ * changes and the ios folder is not regenerated, so both are checked.
+ */
+function readDeclared(projectDir: string, type: string): DeclaredSource[] {
+  const out: DeclaredSource[] = [];
+  let appJsonHasPrivacy = false;
   if (type.startsWith('expo')) {
     const cfg = findExpoConfig(projectDir);
     if (cfg?.appJson) {
       const json = JSON.parse(fs.readFileSync(cfg.appJson, 'utf8'));
       const pm = (json.expo ?? json)?.ios?.privacyManifests;
-      if (pm) return pm;
+      if (pm) {
+        out.push({ label: 'app.json (expo.ios.privacyManifests)', manifest: pm });
+        appJsonHasPrivacy = true;
+      }
     }
   }
+  if (type === 'expo-managed') return out;
+
   const target = findIosManifest(projectDir);
-  return target?.exists ? readManifest(target.file) : null;
+  if (!target) return out;
+  const label = path.relative(projectDir, target.file);
+  const generated = type === 'expo-prebuild' && appJsonHasPrivacy;
+  if (target.exists) out.push({ label, manifest: readManifest(target.file), generated });
+  else if (generated && appJsonHasPrivacy) out.push({ label, manifest: null, generated });
+  return out;
 }
 
 function report(label: string, added: string[], write: boolean) {

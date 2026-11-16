@@ -30,7 +30,7 @@ export interface Analysis {
   data: DataFinding[];
   access: { type: DataType; packages: string[] }[];
   warnings: Warning[];
-  sources: { pkg: string; urls: string[]; notes?: string }[];
+  sources: { pkg: string; version: string; versions?: string; urls: string[]; notes?: string }[];
 }
 
 /**
@@ -83,8 +83,9 @@ export function analyze(scan: ScanResult): Analysis {
       accessMap.set(acc.type, list);
     }
 
-    if (pkg.rule?.sources.length) sources.push({ pkg: pkg.name, urls: pkg.rule.sources, notes: pkg.rule.notes });
-    else if (pkg.rule?.notes) sources.push({ pkg: pkg.name, urls: [], notes: pkg.rule.notes });
+    if (pkg.rule && (pkg.rule.sources.length || pkg.rule.notes)) {
+      sources.push({ pkg: pkg.name, version: pkg.version, versions: pkg.rule.versions, urls: pkg.rule.sources, notes: pkg.rule.notes });
+    }
 
     if (pkg.hasBinaryFramework && !pkg.shipsManifest.length) {
       warnings.push({ pkg: pkg.name, message: 'Contains a prebuilt binary framework that cannot be scanned and no privacy manifest was found. Check the vendor documentation.' });

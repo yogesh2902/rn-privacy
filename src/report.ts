@@ -145,7 +145,8 @@ export function formatMarkdown(scan: ScanResult, a: Analysis): string {
   if (a.sources.length) {
     out.push('## Check these vendor pages', '');
     for (const s of a.sources) {
-      out.push(`- **${s.pkg}**${s.notes ? `: ${s.notes}` : ''}`);
+      const ver = s.versions ? ` (rule for ${s.versions})` : '';
+      out.push(`- **${s.pkg}@${s.version}**${ver}${s.notes ? `: ${s.notes}` : ''}`);
       for (const url of s.urls) out.push(`  - ${url}`);
     }
     out.push('');
@@ -177,6 +178,7 @@ export function toJson(scan: ScanResult, a: Analysis) {
       shipsManifest: p.shipsManifest,
       apis: Object.fromEntries([...p.apis].map(([k, v]) => [k, { reasons: [...v.reasons], evidence: v.evidence }])),
       hasRule: !!p.rule,
+      ruleVersions: p.rule?.versions,
     })),
     warnings: a.warnings,
   };
