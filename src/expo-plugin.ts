@@ -1,4 +1,4 @@
-import { analyze, toApiUsages, toCollected } from './analyze.js';
+import { analyze, toApiUsages, toCollected, trackingDomains } from './analyze.js';
 import { mergeManifest } from './manifest.js';
 import type { PrivacyManifest } from './manifest.js';
 import { scanProject } from './scanner.js';
@@ -7,6 +7,8 @@ import { validateManifest } from './validate.js';
 export interface RnPrivacyPluginOptions {
   /** Also declare data that is only collected in some setups (e.g. after Sentry.setUser()). */
   includeConditional?: boolean;
+  /** Your app tracks users (App Tracking Transparency): set NSPrivacyTracking and add your libraries' tracking domains. */
+  tracking?: boolean;
 }
 
 interface ExpoConfigLike {
@@ -50,6 +52,7 @@ export default function withRnPrivacy<T extends ExpoConfigLike>(config: T, optio
     cache.set(projectRoot, analysis);
   }
 
-  const { manifest } = mergeManifest(existing, toApiUsages(analysis), toCollected(analysis, !!options.includeConditional));
+  const opts = options.tracking ? { tracking: { domains: trackingDomains(analysis) } } : {};
+  const { manifest } = mergeManifest(existing, toApiUsages(analysis), toCollected(analysis, !!options.includeConditional), opts);
   return { ...config, ios: { ...config.ios, privacyManifests: manifest } };
 }

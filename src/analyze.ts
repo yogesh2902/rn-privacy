@@ -32,6 +32,13 @@ export interface Analysis {
   access: { type: DataType; packages: string[] }[];
   warnings: Warning[];
   sources: { pkg: string; version: string; versions?: string; urls: string[]; notes?: string }[];
+  /** Libraries whose own manifest declares tracking or tracking domains. */
+  tracking: { pkg: string; declaresTracking: boolean; domains: string[] }[];
+}
+
+/** Every tracking domain your libraries declare, without duplicates. */
+export function trackingDomains(a: Analysis): string[] {
+  return [...new Set(a.tracking.flatMap((t) => t.domains))].sort();
 }
 
 export { SDK_ONLY_REASONS };
@@ -55,6 +62,7 @@ export function analyze(scan: ScanResult): Analysis {
   const accessMap = new Map<DataType, string[]>();
   const warnings: Warning[] = [];
   const sources: Analysis['sources'] = [];
+  const tracking: Analysis['tracking'] = [];
 
   for (const pkg of scan.packages) {
     // Apple does not reliably read manifests from statically linked pods (see
@@ -78,6 +86,10 @@ export function analyze(scan: ScanResult): Analysis {
       const list = accessMap.get(acc.type) ?? [];
       if (!list.includes(pkg.name)) list.push(pkg.name);
       accessMap.set(acc.type, list);
+    }
+
+    if (pkg.declaresTracking || pkg.trackingDomains.length) {
+      tracking.push({ pkg: pkg.name, declaresTracking: pkg.declaresTracking, domains: pkg.trackingDomains });
     }
 
     if (pkg.rule && (pkg.rule.sources.length || pkg.rule.notes)) {
@@ -118,6 +130,7 @@ export function analyze(scan: ScanResult): Analysis {
     data,
     access: [...accessMap.entries()].map(([type, packages]) => ({ type, packages })),
     warnings,
+    tracking,
     sources,
   };
 }

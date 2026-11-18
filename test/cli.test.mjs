@@ -16,6 +16,8 @@ import { validateManifest } from '../dist/validate.js';
 import { fillPlayCsv, parseCsv } from '../dist/play.js';
 import withRnPrivacy from '../app.plugin.js';
 import * as api from '../dist/index.js';
+import { audit } from '../dist/audit.js';
+import { issuesUrl } from '../dist/scanner.js';
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'cli.js');
 const run = (cwd, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
@@ -393,6 +395,97 @@ test('expo config plugin merges into ios.privacyManifests and check trusts it', 
   assert.equal(stale.status, 1);
   assert.match(stale.stderr, /Missing required reason API: Disk space/);
   assert.match(stale.stderr, /npx expo prebuild/);
+});
+
+const libManifest = (inner) => `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>${inner}</dict></plist>`;
+
+test('audit: invalid, undeclared and incomplete library manifests', () => {
+  const dir = fixture('audit');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'bad-sdk': '1.0.0', 'no-manifest': '1.0.0', 'partial': '1.0.0', 'good-sdk': '1.0.0', 'broken': '1.0.0' } },
+    // Invalid data type and empty purpose, like Segment's manifest.
+    'node_modules/bad-sdk/package.json': { name: 'bad-sdk', version: '2.0.0', repository: { url: 'git+https://github.com/acme/bad-sdk.git' } },
+    'node_modules/bad-sdk/ios/PrivacyInfo.xcprivacy': libManifest('<key>NSPrivacyCollectedDataTypes</key><array><dict><key>NSPrivacyCollectedDataType</key><string>App Name</string><key>NSPrivacyCollectedDataTypeLinked</key><false/><key>NSPrivacyCollectedDataTypeTracking</key><false/><key>NSPrivacyCollectedDataTypePurposes</key><array><string></string></array></dict></array>'),
+    'node_modules/no-manifest/package.json': { name: 'no-manifest', version: '1.0.0', bugs: { url: 'https://example.com/issues' } },
+    'node_modules/no-manifest/ios/Fs.m': 'NSDictionary *a = [fm attributesOfFileSystemForPath:p error:nil][NSFileSystemFreeSize];',
+    'node_modules/partial/package.json': { name: 'partial', version: '1.0.0' },
+    'node_modules/partial/ios/P.swift': 'UserDefaults.standard.set(1, forKey: "k")\nlet t = ProcessInfo.processInfo.systemUptime',
+    'node_modules/partial/ios/PrivacyInfo.xcprivacy': manifestXml([['NSPrivacyAccessedAPICategoryUserDefaults', 'CA92.1']]),
+    // SDK-only reasons are fine in a library's own manifest.
+    'node_modules/good-sdk/package.json': { name: 'good-sdk', version: '1.0.0' },
+    'node_modules/good-sdk/ios/PrivacyInfo.xcprivacy': libManifest('<key>NSPrivacyTracking</key><true/><key>NSPrivacyTrackingDomains</key><array><string>t.good-sdk.com</string></array><key>NSPrivacyAccessedAPITypes</key><array><dict><key>NSPrivacyAccessedAPIType</key><string>NSPrivacyAccessedAPICategoryUserDefaults</string><key>NSPrivacyAccessedAPITypeReasons</key><array><string>C56D.1</string></array></dict></array>'),
+    'node_modules/broken/package.json': { name: 'broken', version: '1.0.0' },
+    'node_modules/broken/ios/PrivacyInfo.xcprivacy': '<plist><dict><key>oops',
+  });
+
+  const a = audit(scanProject(dir));
+  const names = (list) => list.map((x) => x.pkg).sort();
+  assert.deepEqual(names(a.invalid), ['bad-sdk', 'broken']);
+  const bad = a.invalid.find((x) => x.pkg === 'bad-sdk');
+  assert.match(bad.issues.map((i) => i.message).join('\n'), /"App Name" is not a valid collected data type/);
+  assert.match(bad.issues.map((i) => i.message).join('\n'), /"" is not a valid purpose/);
+  assert.equal(bad.issuesUrl, 'https://github.com/acme/bad-sdk/issues');
+  assert.match(a.invalid.find((x) => x.pkg === 'broken').issues[0].message, /Not a valid property list/);
+  assert.deepEqual(names(a.undeclared), ['no-manifest']);
+  assert.equal(a.undeclared[0].issuesUrl, 'https://example.com/issues');
+  assert.deepEqual(a.incomplete.map((x) => [x.pkg, x.missing]), [['partial', ['NSPrivacyAccessedAPICategorySystemBootTime']]]);
+  assert.deepEqual(a.tracking.map((x) => [x.pkg, x.domains]), [['good-sdk', ['t.good-sdk.com']]]);
+
+  const out = run(dir, 'audit');
+  assert.equal(out.status, 0);
+  assert.match(out.stdout, /Invalid privacy manifest \(2\)/);
+  assert.match(out.stdout, /Report it: https:\/\/github.com\/acme\/bad-sdk\/issues/);
+  assert.match(out.stdout, /Your app is still covered/);
+  assert.equal(run(dir, 'audit', '--strict').status, 1);
+  assert.equal(JSON.parse(run(dir, 'audit', '--format', 'json').stdout).invalid.length, 2);
+  assert.match(run(dir, 'scan').stdout, /Library audit/);
+});
+
+test('tracking: --tracking declares SDK tracking domains, check spots missing ones', () => {
+  const dir = fixture('tracking');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'ads-sdk': '1.0.0' } },
+    'node_modules/ads-sdk/package.json': { name: 'ads-sdk', version: '1.0.0' },
+    'node_modules/ads-sdk/ios/PrivacyInfo.xcprivacy': libManifest('<key>NSPrivacyTracking</key><true/><key>NSPrivacyTrackingDomains</key><array><string>track.ads.example</string></array>'),
+    'ios/App.xcodeproj/project.pbxproj': 'PrivacyInfo.xcprivacy',
+    'ios/App/AppDelegate.mm': '',
+  });
+
+  const plain = run(dir, 'ios', '--write');
+  assert.match(plain.stdout, /run again with --tracking/);
+  let xml = fs.readFileSync(path.join(dir, 'ios/App/PrivacyInfo.xcprivacy'), 'utf8');
+  assert.match(xml, /<key>NSPrivacyTracking<\/key>\s*<false\/>/, 'tracking stays off without --tracking');
+
+  const tracked = run(dir, 'ios', '--write', '--tracking');
+  assert.equal(tracked.status, 0, tracked.stderr);
+  xml = fs.readFileSync(path.join(dir, 'ios/App/PrivacyInfo.xcprivacy'), 'utf8');
+  assert.match(xml, /<key>NSPrivacyTracking<\/key>\s*<true\/>/);
+  assert.match(xml, /track\.ads\.example/);
+  assert.equal(run(dir, 'check').status, 0);
+
+  // Tracking on but the domain removed: check warns (it does not fail).
+  write(dir, { 'ios/App/PrivacyInfo.xcprivacy': libManifest('<key>NSPrivacyTracking</key><true/><key>NSPrivacyTrackingDomains</key><array></array>') });
+  const check = run(dir, 'check');
+  assert.equal(check.status, 0, check.stderr);
+  assert.match(check.stdout, /Tracking domain not declared: track\.ads\.example \(from ads-sdk\)/);
+
+  const plugin = withRnPrivacy({ _internal: { projectRoot: dir } }, { tracking: true });
+  assert.equal(plugin.ios.privacyManifests.NSPrivacyTracking, true);
+  assert.deepEqual(plugin.ios.privacyManifests.NSPrivacyTrackingDomains, ['track.ads.example']);
+});
+
+test('issuesUrl understands the usual package.json forms', () => {
+  assert.equal(issuesUrl({ bugs: 'https://x.dev/bugs' }), 'https://x.dev/bugs');
+  assert.equal(issuesUrl({ bugs: { url: 'https://x.dev/b' } }), 'https://x.dev/b');
+  assert.equal(issuesUrl({ repository: 'git+https://github.com/a/b.git' }), 'https://github.com/a/b/issues');
+  assert.equal(issuesUrl({ repository: { url: 'git@github.com:a/b.git' } }), 'https://github.com/a/b/issues');
+  assert.equal(issuesUrl({ repository: 'github:a/b' }), 'https://github.com/a/b/issues');
+  assert.equal(issuesUrl({ repository: 'a/b' }), 'https://github.com/a/b/issues');
+  assert.equal(issuesUrl({ repository: 'gitlab:a/b' }), 'https://gitlab.com/a/b/issues');
+  assert.equal(issuesUrl({ repository: 'https://example.com/repo' }), undefined);
+  assert.equal(issuesUrl({}), undefined);
 });
 
 test('public API works from ESM imports', () => {

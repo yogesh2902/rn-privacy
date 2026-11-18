@@ -126,6 +126,21 @@ export interface PackageReport {
   apis: Map<ApiCategory, { reasons: Set<string>; evidence: ApiEvidence[] }>;
   manifestCollected: CollectedData[];
   rule?: LibraryRule;
+  /** Problems in the privacy manifests the package ships, validated as an SDK manifest. */
+  manifestIssues: ManifestIssue[];
+  /** The package's own manifest sets NSPrivacyTracking to true. */
+  declaresTracking: boolean;
+  /** NSPrivacyTrackingDomains from the package's own manifests. */
+  trackingDomains: string[];
+  /** Where to report problems: the package's issue tracker, if it has one. */
+  issuesUrl?: string;
+}
+
+export interface ManifestIssue {
+  /** Manifest file, relative to the package folder. */
+  file: string;
+  level: 'error' | 'warning';
+  message: string;
 }
 
 export interface ScanResult {

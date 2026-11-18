@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { buildManifest, emptyManifest, mergeManifest, readManifest } from './manifest.js';
-import type { PrivacyManifest } from './manifest.js';
+import type { MergeOptions, PrivacyManifest } from './manifest.js';
 import type { ApiUsage, CollectedData } from './types.js';
 
 export interface IosTarget {
@@ -33,10 +33,10 @@ export function findIosManifest(projectDir: string): IosTarget | null {
   return { file: path.join(appDir, 'PrivacyInfo.xcprivacy'), exists: false, inXcodeProject: false };
 }
 
-export function planIosManifest(target: IosTarget, apis: ApiUsage[], collected: CollectedData[]) {
+export function planIosManifest(target: IosTarget, apis: ApiUsage[], collected: CollectedData[], opts: MergeOptions = {}) {
   const existing = target.exists ? readManifest(target.file) : emptyManifest();
   if (existing === null) throw new Error(`Could not parse ${target.file}. Fix the file or move it away, then run again.`);
-  const { manifest, added } = mergeManifest(existing, apis, collected);
+  const { manifest, added } = mergeManifest(existing, apis, collected, opts);
   return { manifest, added, content: buildManifest(manifest) };
 }
 
@@ -99,16 +99,16 @@ interface AppJson {
 }
 
 /** Merge into expo.ios.privacyManifests in app.json. Returns the new file text. */
-export function planExpoAppJson(file: string, apis: ApiUsage[], collected: CollectedData[]) {
+export function planExpoAppJson(file: string, apis: ApiUsage[], collected: CollectedData[], opts: MergeOptions = {}) {
   const json = JSON.parse(fs.readFileSync(file, 'utf8')) as AppJson;
   const root = json.expo ? json.expo : (json as NonNullable<AppJson['expo']>);
   root.ios ??= {};
-  const { manifest, added } = mergeManifest(root.ios.privacyManifests ?? {}, apis, collected);
+  const { manifest, added } = mergeManifest(root.ios.privacyManifests ?? {}, apis, collected, opts);
   root.ios.privacyManifests = manifest;
   return { added, content: JSON.stringify(json, null, 2) + '\n', manifest };
 }
 
-export function expoSnippet(apis: ApiUsage[], collected: CollectedData[]): string {
-  const { manifest } = mergeManifest({}, apis, collected);
+export function expoSnippet(apis: ApiUsage[], collected: CollectedData[], opts: MergeOptions = {}): string {
+  const { manifest } = mergeManifest({}, apis, collected, opts);
   return JSON.stringify({ expo: { ios: { privacyManifests: manifest } } }, null, 2);
 }

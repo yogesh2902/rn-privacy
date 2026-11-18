@@ -50,8 +50,11 @@ export interface ManifestProblem {
 const isObject = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const isStringArray = (v: unknown): v is string[] => Array.isArray(v) && v.every((x) => typeof x === 'string');
 
-/** Check a parsed privacy manifest. Errors are what App Store Connect rejects; warnings are likely mistakes. */
-export function validateManifest(manifest: unknown): ManifestProblem[] {
+/**
+ * Check a parsed privacy manifest. Errors are what App Store Connect rejects; warnings are likely mistakes.
+ * Pass `{ sdk: true }` for a library's own manifest, where the SDK-only reasons are allowed.
+ */
+export function validateManifest(manifest: unknown, options: { sdk?: boolean } = {}): ManifestProblem[] {
   const problems: ManifestProblem[] = [];
   const error = (message: string) => problems.push({ level: 'error', message });
   const warn = (message: string) => problems.push({ level: 'warning', message });
@@ -102,6 +105,7 @@ export function validateManifest(manifest: unknown): ManifestProblem[] {
         if (!isStringArray(reasons)) return void error(`${category}: NSPrivacyAccessedAPITypeReasons must be an array of strings.`);
         if (!reasons.length) error(`${category}: give at least one reason.`);
         for (const r of reasons) {
+          if (SDK_ONLY_REASONS.has(r) && options.sdk) continue;
           if (SDK_ONLY_REASONS.has(r)) error(`${category}: ${r} is only allowed in third-party SDKs, not in an app. Use ${valid.filter((x) => !SDK_ONLY_REASONS.has(x)).join(', ')} instead.`);
           else if (!valid.includes(r)) error(`${category}: "${r}" is not a valid reason for this category. Valid: ${valid.filter((x) => !SDK_ONLY_REASONS.has(x)).join(', ')}.`);
         }

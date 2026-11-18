@@ -2,18 +2,19 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { analyze, toApiUsages, toCollected } from './analyze.js';
+import { analyze, toApiUsages, toCollected, trackingDomains } from './analyze.js';
+import { audit, auditProblemCount } from './audit.js';
 import { API_LABELS } from './apis.js';
 import { expoSnippet, expoWriteTarget, findExpoConfig, findIosManifest, planExpoAppJson, planIosManifest } from './ios.js';
 import { readManifest } from './manifest.js';
 import { fillPlayCsv } from './play.js';
 import { validateManifest } from './validate.js';
 import type { PrivacyManifest } from './manifest.js';
-import { c, formatMarkdown, formatScan, toJson } from './report.js';
+import { c, formatAudit, formatMarkdown, formatScan, toJson } from './report.js';
 import { scanProject } from './scanner.js';
 import { DATA_TYPES } from './types.js';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 
 const HELP = `${c.bold('rn-privacy')} ${VERSION}
 Privacy manifest and store privacy forms for React Native and Expo apps.
@@ -27,19 +28,22 @@ ${c.bold('Commands')}
   report    Answers for App Store Connect "App Privacy" and Google Play "Data safety"
   play      Fill in the Data safety CSV exported from Play Console: rn-privacy play data_safety.csv -o filled.csv
   check     For CI: exit with code 1 if your manifest is missing or invalid
+  audit     Check the privacy manifests your libraries ship, and where to report problems
 
 ${c.bold('Options')}
   -p, --project <dir>       App folder (default: current folder)
   -w, --write               (ios) Write the changes instead of only showing them
       --include-conditional (ios, play) Also declare data collected only in some setups
-  -f, --format <md|json>    (report, scan) Output format (default: md for report)
+      --tracking            (ios) Your app tracks users: set NSPrivacyTracking and add your libraries' tracking domains
+      --strict              (audit) Exit with code 1 when a library has a problem
+  -f, --format <md|json>    (report, scan, audit) Output format (default: md for report)
   -o, --out <file>          (report, play) Write to a file instead of the terminal
   -h, --help                Show this help
   -v, --version             Show the version
 
 ${c.bold('Also')}
   Expo plugin    Add "plugins": ["rn-privacy"] to app.json to update the manifest on every prebuild
-  GitHub Action  uses: yogesh2902/rn-privacy@v0.2.0 checks every pull request
+  GitHub Action  uses: yogesh2902/rn-privacy@v0.3.0 checks every pull request
   Docs           https://github.com/yogesh2902/rn-privacy
 `;
 
@@ -51,6 +55,8 @@ function main(argv: string[]): number {
       project: { type: 'string', short: 'p' },
       write: { type: 'boolean', short: 'w' },
       'include-conditional': { type: 'boolean' },
+      tracking: { type: 'boolean' },
+      strict: { type: 'boolean' },
       format: { type: 'string', short: 'f' },
       out: { type: 'string', short: 'o' },
       help: { type: 'boolean', short: 'h' },
@@ -63,7 +69,7 @@ function main(argv: string[]): number {
 
   const command = positionals[0] ?? 'scan';
   const projectDir = path.resolve(values.project ?? process.cwd());
-  if (!['scan', 'ios', 'report', 'play', 'check'].includes(command)) {
+  if (!['scan', 'ios', 'report', 'play', 'check', 'audit'].includes(command)) {
     console.error(`Unknown command "${command}".\n\n${HELP}`);
     return 2;
   }
@@ -88,6 +94,7 @@ function main(argv: string[]): number {
     case 'ios': {
       const collected = toCollected(analysis, !!values['include-conditional']);
       const write = !!values.write;
+      const mergeOpts = values.tracking ? { tracking: { domains: trackingDomains(analysis) } } : {};
       let did = false;
 
       const expo = scan.projectType.startsWith('expo') ? findExpoConfig(projectDir) : null;
@@ -99,13 +106,13 @@ function main(argv: string[]): number {
         const current = readExpoPrivacy(expoTarget.file);
         if (current && refuseInvalid('app.json (expo.ios.privacyManifests)', current)) return 1;
         if (expoTarget.note) print(c.dim(expoTarget.note));
-        const plan = planExpoAppJson(expoTarget.file, apis, collected);
+        const plan = planExpoAppJson(expoTarget.file, apis, collected, mergeOpts);
         report(`app.json (expo.ios.privacyManifests)`, plan.added, write);
         if (write && plan.added.length) fs.writeFileSync(expoTarget.file, plan.content);
         did = true;
       } else if (expo?.dynamic) {
         print(c.bold(`${path.basename(expo.dynamic)} is code, so rn-privacy cannot edit it. Add this under expo.ios in your config:`));
-        print(expoSnippet(apis, collected));
+        print(expoSnippet(apis, collected, mergeOpts));
         did = true;
       }
 
@@ -113,7 +120,7 @@ function main(argv: string[]): number {
       if (target) {
         const current = target.exists ? readManifest(target.file) : null;
         if (current && refuseInvalid(path.relative(projectDir, target.file), current)) return 1;
-        const plan = planIosManifest(target, apis, collected);
+        const plan = planIosManifest(target, apis, collected, mergeOpts);
         const rel = path.relative(projectDir, target.file);
         report(rel + (target.exists ? '' : c.dim(' (new file)')), plan.added, write);
         if (write && (plan.added.length || !target.exists)) {
@@ -134,8 +141,9 @@ function main(argv: string[]): number {
         return 1;
       }
       if (!write) print(c.dim('\nDry run. Run again with --write to save.'));
-      if (analysis.data.some((d) => d.tracking)) {
-        print(c.yellow('\nTracking SDKs found: set NSPrivacyTracking and NSPrivacyTrackingDomains yourself (see `rn-privacy scan`).'));
+      if (!values.tracking && (analysis.data.some((d) => d.tracking) || analysis.tracking.length)) {
+        print(c.yellow('\nYour libraries can track users. If your app uses App Tracking Transparency, run again with --tracking'));
+        print(c.yellow(`to set NSPrivacyTracking and declare ${trackingDomains(analysis).length || 'their'} tracking domain(s).`));
       }
       return 0;
     }
@@ -180,6 +188,12 @@ function main(argv: string[]): number {
         print(c.dim('\nDry run. Add -o filled.csv to save the filled file.'));
       }
       return 0;
+    }
+
+    case 'audit': {
+      const result = audit(scan);
+      print(values.format === 'json' ? JSON.stringify(result, null, 2) : formatAudit(result));
+      return values.strict && auditProblemCount(result) ? 1 : 0;
     }
 
     case 'check': {
@@ -241,6 +255,13 @@ function main(argv: string[]): number {
         const missingData = analysis.data.filter((d) => d.packages.length && !haveData.has(DATA_TYPES[d.type].apple));
 
         for (const d of missingData) print(c.yellow(`${pad}! Not declared: ${DATA_TYPES[d.type].label} (collected by ${d.packages.join(', ')})`));
+        if (src.manifest.NSPrivacyTracking === true) {
+          const declaredDomains = new Set(list(src.manifest.NSPrivacyTrackingDomains));
+          for (const t of analysis.tracking) {
+            const missingDomains = t.domains.filter((d) => !declaredDomains.has(d));
+            if (missingDomains.length) print(c.yellow(`${pad}! Tracking domain not declared: ${missingDomains.join(', ')} (from ${t.pkg}). Run \`rn-privacy ios --write --tracking\`.`));
+          }
+        }
         for (const m of missing) console.error(c.red(`${pad}✗ Missing required reason API: ${API_LABELS[m.category]} (used by ${m.packages.join(', ')})`));
         if (missing.length) {
           failed = missingFound = true;
