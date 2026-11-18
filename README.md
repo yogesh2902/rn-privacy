@@ -14,7 +14,8 @@ libraries (Firebase, Sentry, AdMob...), not by your own code. `rn-privacy` scans
 npx rn-privacy            # what your libraries collect and which Apple APIs they use
 npx rn-privacy ios --write  # update PrivacyInfo.xcprivacy (bare) or app.json (Expo)
 npx rn-privacy report -o store-privacy.md  # answers for both store forms
-npx rn-privacy check      # for CI: fails if the manifest is missing something
+npx rn-privacy play data_safety.csv -o filled.csv  # fill Google Play's Data safety CSV
+npx rn-privacy check      # for CI: fails if the manifest is missing something or invalid
 ```
 
 ## What it does
@@ -28,6 +29,10 @@ npx rn-privacy check      # for CI: fails if the manifest is missing something
 - **Reads `ios/Pods`** after `pod install`, so the native SDKs that CocoaPods downloads are covered too.
 - **Merges, never overwrites.** Existing entries in your manifest are kept; it only adds what is missing.
   Dry run by default.
+- **Catches invalid manifests.** `check` validates every key, value type, reason code and data type against
+  Apple's lists, so you find problems before App Store Connect rejects them (`ITMS-91056`).
+- **Fills in Google Play's Data safety form.** Export the form to CSV in Play Console, run `rn-privacy play`
+  on it, and import the filled file.
 - **Works with Expo.** In a managed project it updates `expo.ios.privacyManifests` in `app.json`
   (or prints the snippet if you use `app.config.js`).
 
@@ -65,9 +70,25 @@ Sensitive data your app can read
 | `scan` (default) | Prints required reason APIs, collected data, sensitive device access and warnings. `--format json` for machines. |
 | `ios` | Shows what it would add to your manifest. `--write` saves it. `--include-conditional` also declares data that is only collected in some setups (e.g. after `Sentry.setUser()`). |
 | `report` | Markdown (or `--format json`) with tables for App Store Connect and Google Play. `-o file.md` to save. |
-| `check` | Exit code 1 if a required reason API category is missing from your manifest. Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
+| `play <file.csv>` | Fills in the Data safety CSV exported from Play Console. Dry run unless `-o filled.csv`. `--include-conditional` as for `ios`. |
+| `check` | Exit code 1 if a required reason API category is missing from your manifest, or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
 
 All commands accept `--project <dir>` (default: current folder).
+
+### Google Play Data safety
+
+1. In Play Console, open your app, then **App content > Data safety**, and export the form to CSV.
+2. Run:
+   ```bash
+   npx rn-privacy play data_safety.csv -o filled.csv
+   ```
+3. Import `filled.csv` on the same page and review it. Importing replaces the answers in the form, so always
+   start from a fresh export.
+
+It selects each data type your libraries collect, marks it as collected, and adds the purposes. It only turns
+answers on, never off, and leaves every other row as it was, so it works with whatever template version Play
+gives you. It lists what only you can answer: whether each data type is optional for users, whether data is
+shared, encryption in transit, data deletion, and anything your own code collects.
 
 ### Use it in CI
 
@@ -110,6 +131,8 @@ into your app's manifest.
   to your server). Add that yourself.
 - What an SDK collects depends on its version and your configuration. Every rule links to the vendor's
   disclosure page: `rn-privacy report` lists them at the end. Check them.
+- `rn-privacy ios` will not edit a manifest that `check` reports as invalid. Fix those entries by hand first:
+  it only adds entries and never changes or removes yours.
 - `NSPrivacyTracking` and `NSPrivacyTrackingDomains` are never switched on automatically. If you use ad or
   attribution SDKs, set them yourself together with App Tracking Transparency.
 - Prebuilt binary frameworks inside `node_modules` cannot be scanned. You get a warning when one ships

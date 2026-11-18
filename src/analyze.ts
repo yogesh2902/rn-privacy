@@ -1,5 +1,6 @@
 import { API_CATEGORIES, DEFAULT_REASONS } from './apis.js';
 import type { ApiCategory, ApiUsage, CollectedData, DataType, Purpose, ScanResult } from './types.js';
+import { SDK_ONLY_REASONS } from './validate.js';
 
 export interface ApiFinding {
   category: ApiCategory;
@@ -33,11 +34,7 @@ export interface Analysis {
   sources: { pkg: string; version: string; versions?: string; urls: string[]; notes?: string }[];
 }
 
-/**
- * Reasons Apple only allows inside a third-party SDK's own manifest (for SDKs
- * that wrap the API for the app). An app must never declare them itself.
- */
-export const SDK_ONLY_REASONS = new Set(['C56D.1', '0A2A.1']);
+export { SDK_ONLY_REASONS };
 
 function mergeData(map: Map<DataType, DataFinding>, pkg: string, item: CollectedData, conditional: boolean) {
   let f = map.get(item.type);

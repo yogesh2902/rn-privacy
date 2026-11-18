@@ -12,6 +12,8 @@ import { scanProject } from '../dist/scanner.js';
 import { formatMarkdown } from '../dist/report.js';
 import { findRule } from '../dist/rules.js';
 import { satisfies } from '../dist/semver.js';
+import { validateManifest } from '../dist/validate.js';
+import { fillPlayCsv, parseCsv } from '../dist/play.js';
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'cli.js');
 const run = (cwd, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
@@ -233,6 +235,122 @@ test('findRule picks the rule for the installed version', () => {
   assert.equal(findRule('sdk', '?', rules).name, 'any');
   assert.equal(findRule('sdk', undefined, rules).name, 'any');
   assert.equal(findRule('@sentry/react-native', '6.0.0').name, 'Sentry');
+});
+
+test('validateManifest catches what App Store Connect rejects (ITMS-91056)', () => {
+  const ok = {
+    NSPrivacyTracking: false,
+    NSPrivacyTrackingDomains: [],
+    NSPrivacyAccessedAPITypes: [{ NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryDiskSpace', NSPrivacyAccessedAPITypeReasons: ['E174.1'] }],
+    NSPrivacyCollectedDataTypes: [{
+      NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeCrashData', NSPrivacyCollectedDataTypeLinked: false,
+      NSPrivacyCollectedDataTypeTracking: false, NSPrivacyCollectedDataTypePurposes: ['NSPrivacyCollectedDataTypePurposeAnalytics'],
+    }],
+  };
+  assert.deepEqual(validateManifest(ok), []);
+
+  const errors = (m) => validateManifest(m).filter((p) => p.level === 'error').map((p) => p.message).join('\n');
+  assert.match(errors({ NSPrivacyAccessedAPITypes: [{ NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults', NSPrivacyAccessedAPITypeReasons: ['C56D.1'] }] }), /only allowed in third-party SDKs/);
+  assert.match(errors({ NSPrivacyAccessedAPITypes: [{ NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryDiskSpace', NSPrivacyAccessedAPITypeReasons: ['CA92.1'] }] }), /not a valid reason/);
+  assert.match(errors({ NSPrivacyAccessedAPITypes: [{ NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryDiskSpace', NSPrivacyAccessedAPITypeReasons: [] }] }), /at least one reason/);
+  assert.match(errors({ NSPrivacyAccessedAPITypes: [{ NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryCamera', NSPrivacyAccessedAPITypeReasons: ['X'] }] }), /not a required reason API category/);
+  assert.match(errors({ NSPrivacyTracking: 'NO' }), /must be a boolean/);
+  assert.match(errors({ NSPrivacyTrackingDomains: ['https://ads.example.com/x'] }), /domain name only/);
+  assert.match(errors({ NSPrivacyCollectedDataTypes: [{ ...ok.NSPrivacyCollectedDataTypes[0], NSPrivacyCollectedDataType: 'NSPrivacyCollectedDataTypeIDFA' }] }), /not a valid collected data type/);
+  assert.match(errors({ NSPrivacyCollectedDataTypes: [{ ...ok.NSPrivacyCollectedDataTypes[0], NSPrivacyCollectedDataTypePurposes: ['Analytics'] }] }), /not a valid purpose/);
+  assert.match(errors({ NSPrivacyAccessedAPITypes: 'oops' }), /must be an array/);
+  const warnings = validateManifest({ ...ok, NSPrivacyTrackingDomain: [] }).map((p) => p.message).join('\n');
+  assert.match(warnings, /Unknown key "NSPrivacyTrackingDomain"/);
+});
+
+test('check fails on an invalid manifest and ios refuses to edit it', () => {
+  const dir = fixture('invalid');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'lib-a': '1.0.0' } },
+    'node_modules/lib-a/package.json': { name: 'lib-a', version: '1.0.0' },
+    'node_modules/lib-a/ios/A.swift': 'UserDefaults.standard.set(1, forKey: "k")',
+    'ios/App.xcodeproj/project.pbxproj': 'PrivacyInfo.xcprivacy',
+    'ios/App/PrivacyInfo.xcprivacy': manifestXml([['NSPrivacyAccessedAPICategoryUserDefaults', 'C56D.1']]),
+  });
+  const res = run(dir, 'check');
+  assert.equal(res.status, 1);
+  assert.match(res.stderr, /C56D\.1 is only allowed in third-party SDKs/);
+  assert.match(res.stderr, /ITMS-91056/);
+
+  const before = fs.readFileSync(path.join(dir, 'ios/App/PrivacyInfo.xcprivacy'), 'utf8');
+  const ios = run(dir, 'ios', '--write');
+  assert.equal(ios.status, 1);
+  assert.match(ios.stderr, /will not change it/);
+  assert.equal(fs.readFileSync(path.join(dir, 'ios/App/PrivacyInfo.xcprivacy'), 'utf8'), before, 'file untouched');
+
+  write(dir, { 'ios/App/PrivacyInfo.xcprivacy': '<plist><dict><key>broken' });
+  const broken = run(dir, 'check');
+  assert.equal(broken.status, 1);
+  assert.match(broken.stderr, /not a valid property list/);
+});
+
+const PLAY_HEADER = 'Question ID (machine readable),Response ID (machine readable),Response value,Answer requirement,Human-friendly question label';
+const playRows = (type) => [
+  `PSL_DATA_TYPES_APP_PERFORMANCE,${type},,MULTIPLE_CHOICE,App info and performance / x`,
+  `PSL_DATA_USAGE_RESPONSES:${type}:PSL_DATA_USAGE_COLLECTION_AND_SHARING,PSL_DATA_USAGE_ONLY_COLLECTED,,MULTIPLE_CHOICE,"Data usage (x) / Is this data collected, shared, or both? / Collected"`,
+  `PSL_DATA_USAGE_RESPONSES:${type}:PSL_DATA_USAGE_COLLECTION_AND_SHARING,PSL_DATA_USAGE_ONLY_SHARED,,MULTIPLE_CHOICE,Shared`,
+  `PSL_DATA_USAGE_RESPONSES:${type}:PSL_DATA_USAGE_EPHEMERAL,,,MAYBE_REQUIRED,Ephemeral`,
+  `PSL_DATA_USAGE_RESPONSES:${type}:DATA_USAGE_USER_CONTROL,PSL_DATA_USAGE_USER_CONTROL_OPTIONAL,,SINGLE_CHOICE,Optional`,
+  `PSL_DATA_USAGE_RESPONSES:${type}:DATA_USAGE_USER_CONTROL,PSL_DATA_USAGE_USER_CONTROL_REQUIRED,,SINGLE_CHOICE,Required`,
+  `PSL_DATA_USAGE_RESPONSES:${type}:DATA_USAGE_COLLECTION_PURPOSE,PSL_APP_FUNCTIONALITY,,MULTIPLE_CHOICE,Functionality`,
+  `PSL_DATA_USAGE_RESPONSES:${type}:DATA_USAGE_COLLECTION_PURPOSE,PSL_ANALYTICS,FALSE,MULTIPLE_CHOICE,Analytics`,
+];
+
+test('play: fills the exported Data safety CSV without turning anything off', () => {
+  const csv = [
+    PLAY_HEADER,
+    'PSL_DATA_COLLECTION_COLLECTS_PERSONAL_DATA,,,REQUIRED,Does your app collect or share any of the required user data types?',
+    ...playRows('PSL_CRASH_LOGS'),
+    'PSL_DATA_TYPES_PERSONAL,PSL_NAME,TRUE,MULTIPLE_CHOICE,Personal info / Name',
+  ].join('\r\n') + '\r\n';
+
+  const collected = [
+    { type: 'crash-data', purposes: ['analytics', 'app-functionality'], linked: false, tracking: false },
+    { type: 'device-id', purposes: ['analytics'], linked: false, tracking: false },
+  ];
+  const result = fillPlayCsv(csv, collected);
+  assert.ok(result.content.includes('\r\n') && result.content.endsWith('\r\n'), 'keeps CRLF and the trailing newline');
+  const rows = parseCsv(result.content);
+  const value = (q, r = '') => rows.find((x) => x[0] === q && x[1] === r)?.[2];
+  const usage = 'PSL_DATA_USAGE_RESPONSES:PSL_CRASH_LOGS';
+  assert.equal(value('PSL_DATA_COLLECTION_COLLECTS_PERSONAL_DATA'), 'true');
+  assert.equal(value('PSL_DATA_TYPES_APP_PERFORMANCE', 'PSL_CRASH_LOGS'), 'true');
+  assert.equal(value(`${usage}:PSL_DATA_USAGE_COLLECTION_AND_SHARING`, 'PSL_DATA_USAGE_ONLY_COLLECTED'), 'true');
+  assert.equal(value(`${usage}:PSL_DATA_USAGE_COLLECTION_AND_SHARING`, 'PSL_DATA_USAGE_ONLY_SHARED'), '', 'sharing left to the developer');
+  assert.equal(value(`${usage}:PSL_DATA_USAGE_EPHEMERAL`), 'false');
+  assert.equal(value(`${usage}:DATA_USAGE_COLLECTION_PURPOSE`, 'PSL_ANALYTICS'), 'true', 'FALSE is turned on when the SDK collects for analytics');
+  assert.equal(value('PSL_DATA_TYPES_PERSONAL', 'PSL_NAME'), 'TRUE', 'existing answers are kept as they are');
+  assert.equal(rows[3][4], 'Data usage (x) / Is this data collected, shared, or both? / Collected', 'quoted labels survive');
+  assert.deepEqual(result.todo, ['Crash logs']);
+  assert.ok(result.missingRows.some((m) => m.includes('PSL_DEVICE_ID')), 'reports rows the template does not have');
+
+  const again = fillPlayCsv(result.content, collected);
+  assert.deepEqual(again.changes, []);
+  assert.equal(again.content, result.content, 'idempotent');
+  assert.throws(() => fillPlayCsv('a,b\n1,2\n', collected), /not a Data safety CSV/);
+});
+
+test('play command: dry run by default, -o writes', () => {
+  const dir = fixture('play');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { '@sentry/react-native': '6.0.0' } },
+    'node_modules/@sentry/react-native/package.json': { name: '@sentry/react-native', version: '6.0.0' },
+    'export.csv': [PLAY_HEADER, ...playRows('PSL_CRASH_LOGS')].join('\n') + '\n',
+  });
+  const dry = run(dir, 'play', 'export.csv');
+  assert.equal(dry.status, 0, dry.stderr);
+  assert.match(dry.stdout, /\+ Crash logs: selected, collected/);
+  assert.match(dry.stdout, /Dry run/);
+  assert.ok(!fs.existsSync(path.join(dir, 'filled.csv')));
+  const wrote = run(dir, 'play', 'export.csv', '-o', 'filled.csv');
+  assert.equal(wrote.status, 0, wrote.stderr);
+  assert.match(fs.readFileSync(path.join(dir, 'filled.csv'), 'utf8'), /PSL_CRASH_LOGS,true/);
+  assert.equal(run(dir, 'play').status, 2, 'usage without a file');
 });
 
 test('--help and unknown command', () => {
