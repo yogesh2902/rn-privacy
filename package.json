@@ -1,7 +1,7 @@
 {
   "name": "rn-privacy",
   "version": "0.2.0",
-  "description": "Generate the Apple privacy manifest, App Store privacy labels and Google Play Data safety answers for React Native and Expo apps by scanning your dependencies.",
+  "description": "Fix ITMS-91053 and ITMS-91056 in React Native and Expo apps: generate and validate the Apple privacy manifest, App Store privacy labels and Google Play Data safety answers from your dependencies. CLI, Expo config plugin and GitHub Action.",
   "keywords": [
     "react-native",
     "expo",
@@ -16,7 +16,11 @@
     "app-store-privacy",
     "privacy-labels",
     "expo-config-plugin",
-    "github-action"
+    "github-action",
+    "ITMS-91056",
+    "privacy",
+    "expo-plugin",
+    "react-native-privacy"
   ],
   "license": "MIT",
   "author": "yogeshdev",

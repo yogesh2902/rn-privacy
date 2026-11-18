@@ -36,6 +36,11 @@ ${c.bold('Options')}
   -o, --out <file>          (report, play) Write to a file instead of the terminal
   -h, --help                Show this help
   -v, --version             Show the version
+
+${c.bold('Also')}
+  Expo plugin    Add "plugins": ["rn-privacy"] to app.json to update the manifest on every prebuild
+  GitHub Action  uses: yogesh2902/rn-privacy@v0.2.0 checks every pull request
+  Docs           https://github.com/yogesh2902/rn-privacy
 `;
 
 function main(argv: string[]): number {

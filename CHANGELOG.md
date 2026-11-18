@@ -6,6 +6,10 @@
   Tested with Expo SDK 52, 54 and 58.
 - **GitHub Action:** `uses: yogesh2902/rn-privacy@v0.2.0` runs `check`, annotates the pull request, and writes
   the result and store privacy answers to the job summary.
+- Rules: Branch and Segment now follow the privacy manifests those SDKs ship and their current docs. Branch no
+  longer claims approximate location, and its device ID is linked and used for tracking. Segment's device ID is
+  linked, and advertising data is listed when you use its IDFA plugin. Dead vendor links were replaced.
+- `--help` mentions the Expo plugin and the GitHub Action.
 - The package is now compiled to CommonJS so the Expo plugin loads on every Node version. `import` and
   `require` both keep working.
 - New `play` command: fills in the Google Play Data safety CSV exported from Play Console. It selects the data
