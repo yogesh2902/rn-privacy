@@ -5,4 +5,8 @@ export { mergeManifest, readManifest, buildManifest } from './manifest.js';
 export { findIosManifest, findExpoConfig } from './ios.js';
 export { formatMarkdown, toJson } from './report.js';
 export { RULES, findRule } from './rules.js';
+export { validateManifest, VALID_REASONS, VALID_DATA_TYPES, VALID_PURPOSES, SDK_ONLY_REASONS } from './validate.js';
+export type { ManifestProblem } from './validate.js';
+export { fillPlayCsv, parseCsv, PLAY_DATA_IDS, PLAY_PURPOSE_IDS } from './play.js';
+export type { PlayFillResult } from './play.js';
 export * from './types.js';

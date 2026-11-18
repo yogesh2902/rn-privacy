@@ -102,6 +102,7 @@ export function formatMarkdown(scan: ScanResult, a: Analysis): string {
 
   // Play -----------------------------------------------------------
   out.push('## Google Play Console: Data safety', '');
+  out.push('Tip: export the Data safety form to CSV in Play Console and run `npx rn-privacy play data_safety.csv -o filled.csv` to fill these answers in, then import the file.', '');
   out.push('Answer **Yes** to "Does your app collect or share any of the required user data types?" if this table is not empty.', '');
   out.push('| Category | Data type | Purposes | Collected by |', '| --- | --- | --- | --- |');
   const playRows = a.data

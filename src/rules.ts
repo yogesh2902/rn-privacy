@@ -116,13 +116,19 @@ export const RULES: LibraryRule[] = [
   {
     packages: ['@segment/analytics-react-native'],
     name: 'Segment',
+    // From the PrivacyInfo.xcprivacy Segment ships in @segment/analytics-react-native 2.21 (packages/core/ios).
     collects: [
-      { type: 'device-id', purposes: ['analytics'], linked: false, tracking: false },
-      { type: 'product-interaction', purposes: ['analytics'], linked: false, tracking: false },
+      { type: 'device-id', purposes: ['analytics', 'developer-advertising'], linked: true, tracking: false },
+      { type: 'product-interaction', purposes: ['analytics'], linked: true, tracking: false },
       { type: 'user-id', purposes: ['analytics'], linked: true, tracking: false, conditional: 'Only if you call identify()' },
+      { type: 'advertising-data', purposes: ['developer-advertising'], linked: false, tracking: false, conditional: 'Only with @segment/analytics-react-native-plugin-idfa' },
     ],
-    sources: ['https://segment.com/docs/connections/sources/catalog/libraries/mobile/react-native/'],
-    notes: 'Segment forwards data to the destinations you configure. Each destination may need its own disclosure.',
+    sources: [
+      'https://segment.com/docs/connections/sources/catalog/libraries/mobile/react-native/implementation/',
+      'https://segment.com/docs/connections/sources/catalog/libraries/mobile/apple/ios-17/',
+      'https://github.com/segmentio/analytics-react-native/blob/master/packages/core/ios/PrivacyInfo.xcprivacy',
+    ],
+    notes: 'Segment forwards data to the destinations you configure. Each destination may need its own disclosure. Segment\'s own manifest contains invalid entries ("App Name", "App Version", an empty purpose); rn-privacy ignores them.',
   },
   {
     packages: ['mixpanel-react-native'],
@@ -200,12 +206,19 @@ export const RULES: LibraryRule[] = [
   {
     packages: ['react-native-branch'],
     name: 'Branch',
+    // From the PrivacyInfo.xcprivacy in Branch's iOS SDK and Branch's App Store Connect guide.
     collects: [
-      { type: 'device-id', purposes: ['analytics', 'app-functionality'], linked: false, tracking: false },
-      { type: 'product-interaction', purposes: ['analytics'], linked: false, tracking: false },
-      { type: 'coarse-location', purposes: ['analytics'], linked: false, tracking: false, conditional: 'Derived from the IP address' },
+      { type: 'device-id', purposes: ['third-party-advertising', 'developer-advertising', 'analytics'], linked: true, tracking: true },
+      { type: 'performance-data', purposes: ['app-functionality'], linked: false, tracking: false },
+      { type: 'product-interaction', purposes: ['analytics', 'developer-advertising'], linked: true, tracking: false, conditional: 'Only if you log events with Branch' },
+      { type: 'purchase-history', purposes: ['analytics', 'developer-advertising'], linked: true, tracking: false, conditional: 'Only if you log commerce events with Branch' },
     ],
-    sources: ['https://help.branch.io/developers-hub/docs/ios-privacy-manifest'],
+    sources: [
+      'https://help.branch.io/using-branch/docs/answering-the-app-store-connect-privacy-questions',
+      'https://help.branch.io/developer-hub/docs/ios-17-privacy-overview',
+      'https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/blob/master/Sources/Resources/PrivacyInfo.xcprivacy',
+    ],
+    notes: 'Branch also answers Yes to "Browsing history" (Apple\'s broad definition) and "Other data" (device metadata) in App Store Connect. Its SDK declares tracking with the domains api-safetrack.branch.io and api-safetrack-eu.branch.io, used only after ATT opt-in. If you only use deep linking, Branch says its data is not used for tracking.',
   },
 
   // -------------------------------------------------- Push / purchases / misc
