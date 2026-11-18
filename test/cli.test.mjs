@@ -476,6 +476,42 @@ test('tracking: --tracking declares SDK tracking domains, check spots missing on
   assert.deepEqual(plugin.ios.privacyManifests.NSPrivacyTrackingDomains, ['track.ads.example']);
 });
 
+test('check --format json', () => {
+  const dir = fixture('check-json');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'lib-a': '1.0.0' } },
+    'node_modules/lib-a/package.json': { name: 'lib-a', version: '1.0.0' },
+    'node_modules/lib-a/ios/A.swift': 'UserDefaults.standard.set(1, forKey: "k")\nlet k: URLResourceKey = .volumeAvailableCapacityKey',
+    'ios/App.xcodeproj/project.pbxproj': 'PrivacyInfo.xcprivacy',
+    'ios/App/PrivacyInfo.xcprivacy': manifestXml([['NSPrivacyAccessedAPICategoryUserDefaults', 'C56D.1']]),
+  });
+  const res = run(dir, 'check', '--format', 'json');
+  assert.equal(res.status, 1);
+  assert.equal(res.stderr, '', 'JSON mode prints nothing else');
+  const r = JSON.parse(res.stdout);
+  assert.equal(r.ok, false);
+  assert.equal(r.projectType, 'bare');
+  assert.deepEqual(r.requiredApis.map((a) => a.label).sort(), ['Disk space', 'User defaults']);
+  assert.equal(r.manifests.length, 1);
+  const m = r.manifests[0];
+  assert.equal(m.label, path.join('ios', 'App', 'PrivacyInfo.xcprivacy'));
+  assert.equal(m.status, 'invalid');
+  assert.match(m.errors[0], /C56D\.1 is only allowed in third-party SDKs/);
+  assert.deepEqual(m.missingApis.map((a) => [a.label, a.packages]), [['Disk space', ['lib-a']]]);
+  assert.match(r.hint, /Fix the invalid entries/);
+
+  write(dir, { 'ios/App/PrivacyInfo.xcprivacy': manifestXml([['NSPrivacyAccessedAPICategoryUserDefaults', 'CA92.1'], ['NSPrivacyAccessedAPICategoryDiskSpace', 'E174.1']]) });
+  const ok = run(dir, 'check', '--format', 'json');
+  assert.equal(ok.status, 0);
+  assert.equal(JSON.parse(ok.stdout).ok, true);
+  assert.equal(JSON.parse(ok.stdout).manifests[0].status, 'ok');
+
+  const none = fixture('check-json-none');
+  write(none, { 'package.json': { name: 'App', dependencies: {} }, 'ios/App.xcodeproj/project.pbxproj': '' });
+  const empty = JSON.parse(run(none, 'check', '--format', 'json').stdout);
+  assert.equal(empty.manifests.length, 0);
+});
+
 test('issuesUrl understands the usual package.json forms', () => {
   assert.equal(issuesUrl({ bugs: 'https://x.dev/bugs' }), 'https://x.dev/bugs');
   assert.equal(issuesUrl({ bugs: { url: 'https://x.dev/b' } }), 'https://x.dev/b');

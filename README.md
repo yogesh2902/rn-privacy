@@ -84,7 +84,7 @@ Sensitive data your app can read
 | `ios` | Shows what it would add to your manifest. `--write` saves it. `--include-conditional` also declares data that is only collected in some setups (e.g. after `Sentry.setUser()`). `--tracking` sets `NSPrivacyTracking` and adds your libraries' tracking domains. |
 | `report` | Markdown (or `--format json`) with tables for App Store Connect and Google Play. `-o file.md` to save. |
 | `play <file.csv>` | Fills in the Data safety CSV exported from Play Console. Dry run unless `-o filled.csv`. `--include-conditional` as for `ios`. |
-| `check` | Exit code 1 if a required reason API category is missing from your manifest, or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
+| `check` | `--format json` for CI tools. Exit code 1 if a required reason API category is missing from your manifest, or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
 
 | `audit` | Checks the privacy manifests your libraries ship: invalid files, missing manifests, missing categories, tracking. `--strict` exits with code 1 on a problem. `--format json` for machines. |
 
@@ -162,6 +162,50 @@ to also declare data that is only collected in some setups, and `{ "tracking": t
 
 With the plugin enabled, `rn-privacy check` knows the manifest is generated and passes in a managed project.
 If you have an `ios` folder, it checks that folder too and tells you to run `expo prebuild` when it is stale.
+
+### EAS Build
+
+Run `check` inside EAS Build, so every iOS build is checked against the files that actually ship. On iOS, EAS runs
+the `eas-build-post-install` hook after `npm install`, `expo prebuild` and `pod install`
+([Expo docs](https://docs.expo.dev/build-reference/npm-hooks/)), so `check` sees the generated `ios` folder and
+the CocoaPods SDKs. Add it to `package.json`:
+
+```json
+{
+  "scripts": {
+    "eas-build-post-install": "[ \"$EAS_BUILD_PLATFORM\" != \"ios\" ] || npx rn-privacy check"
+  }
+}
+```
+
+The guard skips Android builds and local runs (`EAS_BUILD_PLATFORM` is only set inside EAS). If the manifest is
+missing something or is invalid, the iOS build fails with the reason in the build log, before anything is
+uploaded. With the Expo config plugin the manifest is regenerated on every build, so this is a safety net.
+
+### JSON output
+
+`scan`, `report`, `audit` and `check` accept `--format json`. `check --format json` prints the full result and
+keeps the exit code (0 when everything is covered, 1 otherwise):
+
+```json
+{
+  "ok": false,
+  "projectType": "bare",
+  "usesExpoPlugin": false,
+  "requiredApis": [{ "category": "NSPrivacyAccessedAPICategoryDiskSpace", "label": "Disk space", "reasons": ["E174.1"], "packages": ["react-native-fs"] }],
+  "manifests": [{
+    "label": "ios/MyApp/PrivacyInfo.xcprivacy",
+    "status": "missing-apis",
+    "generated": false,
+    "completedByPlugin": false,
+    "missingApis": [{ "category": "NSPrivacyAccessedAPICategoryDiskSpace", "label": "Disk space", "packages": ["react-native-fs"] }],
+    "errors": [], "warnings": [], "undeclaredData": [], "missingTrackingDomains": []
+  }],
+  "hint": "Run `rn-privacy ios --write` to fix."
+}
+```
+
+`status` is one of `ok`, `missing-apis`, `invalid`, `not-generated` or `unreadable`.
 
 ### GitHub Action
 
