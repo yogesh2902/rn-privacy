@@ -1,0 +1,41 @@
+name: rn-privacy check
+description: Catch Apple privacy manifest rejections (ITMS-91053, ITMS-91056) in React Native and Expo apps before you upload.
+author: yogesh2902
+branding:
+  icon: shield
+  color: green
+
+inputs:
+  project-path:
+    description: Folder of the app (the one with package.json). Run your package install first.
+    default: .
+  version:
+    description: rn-privacy version to run (for example 0.2.0). Defaults to the latest release.
+    default: latest
+  fail-on-error:
+    description: Fail the job when the privacy manifest is missing something or is invalid.
+    default: 'true'
+  summary:
+    description: Write the result and the store privacy answers to the job summary.
+    default: 'true'
+  annotations:
+    description: Show problems as error and warning annotations on the pull request.
+    default: 'true'
+
+outputs:
+  result:
+    description: pass or fail
+    value: ${{ steps.check.outputs.result }}
+
+runs:
+  using: composite
+  steps:
+    - id: check
+      shell: bash
+      env:
+        INPUT_PROJECT: ${{ inputs.project-path }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_FAIL: ${{ inputs.fail-on-error }}
+        INPUT_SUMMARY: ${{ inputs.summary }}
+        INPUT_ANNOTATIONS: ${{ inputs.annotations }}
+      run: bash "$GITHUB_ACTION_PATH/action/run.sh"

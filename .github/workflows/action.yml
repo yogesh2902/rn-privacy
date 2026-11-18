@@ -1,0 +1,55 @@
+name: action
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build && npm pack --pack-destination "$RUNNER_TEMP"
+      - run: |
+          for kind in good missing invalid; do node test/fixtures/make-app.mjs "$RUNNER_TEMP/$kind" "$kind"; done
+          echo "TARBALL=$(ls "$RUNNER_TEMP"/rn-privacy-*.tgz)" >> "$GITHUB_ENV"
+
+      - name: Passing app
+        id: good
+        uses: ./
+        with:
+          project-path: ${{ runner.temp }}/good
+          version: ${{ env.TARBALL }}
+
+      - name: App missing a category
+        id: missing
+        uses: ./
+        with:
+          project-path: ${{ runner.temp }}/missing
+          version: ${{ env.TARBALL }}
+          fail-on-error: 'false'
+          summary: 'false'
+          annotations: 'false'
+
+      - name: App with an invalid reason
+        id: invalid
+        uses: ./
+        with:
+          project-path: ${{ runner.temp }}/invalid
+          version: ${{ env.TARBALL }}
+          fail-on-error: 'false'
+          summary: 'false'
+          annotations: 'false'
+
+      - name: Check results
+        env:
+          GOOD: ${{ steps.good.outputs.result }}
+          MISSING: ${{ steps.missing.outputs.result }}
+          INVALID: ${{ steps.invalid.outputs.result }}
+        run: |
+          echo "good=$GOOD missing=$MISSING invalid=$INVALID"
+          test "$GOOD" = pass && test "$MISSING" = fail && test "$INVALID" = fail
