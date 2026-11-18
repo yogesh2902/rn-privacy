@@ -18,6 +18,14 @@ npx rn-privacy play data_safety.csv -o filled.csv  # fill Google Play's Data saf
 npx rn-privacy check      # for CI: fails if the manifest is missing something or invalid
 ```
 
+**Expo?** Add the config plugin and the manifest is generated on every prebuild, so it never falls behind:
+
+```json
+{ "expo": { "plugins": ["rn-privacy"] } }
+```
+
+**GitHub?** Add the action and every pull request shows what its libraries need (see [GitHub Action](#github-action)).
+
 ## What it does
 
 - **Finds Apple "required reason" APIs** (User defaults, File timestamps, System boot time, Disk space,
@@ -90,7 +98,51 @@ answers on, never off, and leaves every other row as it was, so it works with wh
 gives you. It lists what only you can answer: whether each data type is optional for users, whether data is
 shared, encryption in transit, data deletion, and anything your own code collects.
 
-### Use it in CI
+### Expo config plugin
+
+```bash
+npm install --save-dev rn-privacy
+```
+
+```json
+{
+  "expo": {
+    "plugins": ["rn-privacy"]
+  }
+}
+```
+
+On every `expo prebuild` (and EAS Build), the plugin scans your dependencies and merges what they need into
+`expo.ios.privacyManifests`. Expo then writes `ios/<App>/PrivacyInfo.xcprivacy` from it. Anything you already
+declared in `privacyManifests` is kept: the plugin only adds. Pass `["rn-privacy", { "includeConditional": true }]`
+to also declare data that is only collected in some setups. Tested with Expo SDK 52, 54 and 58.
+
+With the plugin enabled, `rn-privacy check` knows the manifest is generated and passes in a managed project.
+If you have an `ios` folder, it checks that folder too and tells you to run `expo prebuild` when it is stale.
+
+### GitHub Action
+
+```yaml
+- uses: actions/checkout@v4
+- run: npm ci
+- uses: yogesh2902/rn-privacy@v0.2.0
+```
+
+It runs `rn-privacy check`, fails the job when the manifest is missing something or is invalid, shows each
+problem as an annotation on the pull request, and writes the result and the store privacy answers to the job
+summary.
+
+| Input | Default | |
+| --- | --- | --- |
+| `project-path` | `.` | Folder with the app's `package.json` (for monorepos). |
+| `version` | `latest` | rn-privacy version to run. |
+| `fail-on-error` | `true` | Set to `false` to only report. |
+| `summary` | `true` | Write the job summary. |
+| `annotations` | `true` | Annotate the pull request. |
+
+The `result` output is `pass` or `fail`.
+
+### Use it in other CI
 
 ```yaml
 - run: npm ci

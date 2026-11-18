@@ -1,6 +1,13 @@
 # Changelog
 
 ## 0.2.0
+- **Expo config plugin:** add `"plugins": ["rn-privacy"]` and every prebuild merges what your libraries need
+  into `expo.ios.privacyManifests`, so the generated manifest is always current. `check` recognizes the plugin.
+  Tested with Expo SDK 52, 54 and 58.
+- **GitHub Action:** `uses: yogesh2902/rn-privacy@v0.2.0` runs `check`, annotates the pull request, and writes
+  the result and store privacy answers to the job summary.
+- The package is now compiled to CommonJS so the Expo plugin loads on every Node version. `import` and
+  `require` both keep working.
 - New `play` command: fills in the Google Play Data safety CSV exported from Play Console. It selects the data
   types your libraries collect, marks them as collected, adds purposes, never turns an answer off, keeps the
   file's format, and lists what you still need to answer.

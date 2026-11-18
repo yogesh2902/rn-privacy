@@ -14,7 +14,9 @@
     "ITMS-91053",
     "required-reason-api",
     "app-store-privacy",
-    "privacy-labels"
+    "privacy-labels",
+    "expo-config-plugin",
+    "github-action"
   ],
   "license": "MIT",
   "author": "yogeshdev",
@@ -26,7 +28,6 @@
   "bugs": {
     "url": "https://github.com/yogesh2902/rn-privacy/issues"
   },
-  "type": "module",
   "bin": {
     "rn-privacy": "dist/cli.js"
   },
@@ -34,6 +35,7 @@
   "types": "dist/index.d.ts",
   "files": [
     "dist",
+    "app.plugin.js",
     "README.md",
     "LICENSE"
   ],

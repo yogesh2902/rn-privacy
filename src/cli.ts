@@ -86,6 +86,9 @@ function main(argv: string[]): number {
       let did = false;
 
       const expo = scan.projectType.startsWith('expo') ? findExpoConfig(projectDir) : null;
+      if (expo?.usesPlugin) {
+        print(c.dim('The rn-privacy Expo plugin is enabled, so `expo prebuild` already adds all of this. You do not need --write.\n'));
+      }
       const expoTarget = expo ? expoWriteTarget(expo) : null;
       if (expoTarget) {
         const current = readExpoPrivacy(expoTarget.file);
@@ -175,9 +178,14 @@ function main(argv: string[]): number {
     }
 
     case 'check': {
-      const declared = readDeclared(projectDir, scan.projectType);
+      const expoCfg = scan.projectType.startsWith('expo') ? findExpoConfig(projectDir) : null;
+      const plugin = !!expoCfg?.usesPlugin;
+      const declared = readDeclared(projectDir, scan.projectType, plugin);
+      if (!declared.length && plugin) {
+        return print(c.green(`✓ The rn-privacy Expo plugin adds all ${analysis.apis.length} required reason API categories at prebuild.`));
+      }
       if (!declared.length) {
-        const expo = scan.projectType.startsWith('expo') ? findExpoConfig(projectDir) : null;
+        const expo = expoCfg;
         if (expo?.dynamic && expo.dynamicMentionsPrivacy) {
           console.error(c.red(`✗ privacyManifests is set in ${path.basename(expo.dynamic)}, which rn-privacy cannot read (it never runs your code).`));
           console.error('  Move expo.ios.privacyManifests to app.json so it can be checked.');
@@ -203,7 +211,7 @@ function main(argv: string[]): number {
           continue;
         }
         if (!src.manifest) {
-          console.error(c.red(`${pad}✗ Not generated yet. app.json has privacyManifests, but ${src.label} does not exist.`));
+          console.error(c.red(`${pad}✗ Not generated yet: ${src.label} does not exist. Run \`npx expo prebuild\`.`));
           failed = generatedOutdated = true;
           continue;
         }
@@ -215,6 +223,12 @@ function main(argv: string[]): number {
           console.error(c.red(`${pad}  App Store Connect rejects invalid manifests with ITMS-91056.`));
           failed = true;
           invalidFound = true;
+        }
+        if (plugin && src.isAppJson) {
+          // The plugin completes app.json's privacyManifests at prebuild: only its validity matters here.
+          if (!invalid.length) print(c.green(`${pad}✓ Valid. The rn-privacy Expo plugin adds the rest at prebuild.`));
+          if (!invalid.length) sourceOk = true;
+          continue;
         }
         const have = new Set(list(src.manifest.NSPrivacyAccessedAPITypes).map((e) => e?.NSPrivacyAccessedAPIType));
         const missing = analysis.apis.filter((a) => !have.has(a.category));
@@ -236,6 +250,8 @@ function main(argv: string[]): number {
       if (invalidFound) {
         console.error('\nFix the invalid entries by hand: rn-privacy only adds entries, it never edits or removes yours.');
         if (missingFound) console.error('Then run `rn-privacy ios --write` to add what is missing.');
+      } else if (generatedOutdated && plugin) {
+        console.error('\nThe ios folder is out of date. Run `npx expo prebuild` and the rn-privacy plugin will regenerate the manifest.');
       } else if (generatedOutdated && sourceOk) {
         console.error('\napp.json is correct, but the ios folder is out of date with it.');
         console.error('Run `npx expo prebuild` to regenerate it, or `rn-privacy ios --write` to update both.');
@@ -256,6 +272,8 @@ interface DeclaredSource {
   generated?: boolean;
   /** The file exists but is not a valid property list. */
   unreadable?: boolean;
+  /** expo.ios.privacyManifests in app.json. */
+  isAppJson?: boolean;
 }
 
 /**
@@ -263,7 +281,7 @@ interface DeclaredSource {
  * PrivacyInfo.xcprivacy that `expo prebuild` writes into ios/. They drift apart when app.json
  * changes and the ios folder is not regenerated, so both are checked.
  */
-function readDeclared(projectDir: string, type: string): DeclaredSource[] {
+function readDeclared(projectDir: string, type: string, usesPlugin = false): DeclaredSource[] {
   const out: DeclaredSource[] = [];
   let appJsonHasPrivacy = false;
   if (type.startsWith('expo')) {
@@ -271,7 +289,7 @@ function readDeclared(projectDir: string, type: string): DeclaredSource[] {
     if (cfg?.appJson) {
       const pm = readExpoPrivacy(cfg.appJson);
       if (pm) {
-        out.push({ label: 'app.json (expo.ios.privacyManifests)', manifest: pm });
+        out.push({ label: 'app.json (expo.ios.privacyManifests)', manifest: pm, isAppJson: true });
         appJsonHasPrivacy = true;
       }
     }
@@ -281,12 +299,12 @@ function readDeclared(projectDir: string, type: string): DeclaredSource[] {
   const target = findIosManifest(projectDir);
   if (!target) return out;
   const label = path.relative(projectDir, target.file);
-  const generated = type === 'expo-prebuild' && appJsonHasPrivacy;
+  const generated = type === 'expo-prebuild' && (appJsonHasPrivacy || usesPlugin);
   if (target.exists) {
     const manifest = readManifest(target.file);
     out.push({ label, manifest, generated, unreadable: manifest === null });
   }
-  else if (generated && appJsonHasPrivacy) out.push({ label, manifest: null, generated });
+  else if (generated) out.push({ label, manifest: null, generated });
   return out;
 }
 

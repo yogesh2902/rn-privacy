@@ -49,6 +49,8 @@ export interface ExpoConfig {
   dynamicExtendsAppJson: boolean;
   /** The dynamic config text mentions privacyManifests itself. */
   dynamicMentionsPrivacy: boolean;
+  /** The rn-privacy config plugin is enabled, so prebuild generates the manifest. */
+  usesPlugin: boolean;
 }
 
 export function findExpoConfig(projectDir: string): ExpoConfig | null {
@@ -61,11 +63,22 @@ export function findExpoConfig(projectDir: string): ExpoConfig | null {
     dynamic: dyn,
     dynamicExtendsAppJson: false,
     dynamicMentionsPrivacy: false,
+    usesPlugin: false,
   };
+  if (cfg.appJson) {
+    try {
+      const json = JSON.parse(fs.readFileSync(cfg.appJson, 'utf8'));
+      const plugins: unknown[] = (json.expo ?? json)?.plugins ?? [];
+      cfg.usesPlugin = plugins.some((p) => (Array.isArray(p) ? p[0] : p) === 'rn-privacy');
+    } catch {
+      // Invalid app.json: other commands report it.
+    }
+  }
   if (dyn) {
     const text = fs.readFileSync(dyn, 'utf8');
     cfg.dynamicExtendsAppJson = /\.\.\.\s*config\b/.test(text);
     cfg.dynamicMentionsPrivacy = text.includes('privacyManifests');
+    if (/['"`]rn-privacy['"`]/.test(text)) cfg.usesPlugin = true;
   }
   return cfg.appJson || cfg.dynamic ? cfg : null;
 }

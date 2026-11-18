@@ -14,6 +14,8 @@ import { findRule } from '../dist/rules.js';
 import { satisfies } from '../dist/semver.js';
 import { validateManifest } from '../dist/validate.js';
 import { fillPlayCsv, parseCsv } from '../dist/play.js';
+import withRnPrivacy from '../app.plugin.js';
+import * as api from '../dist/index.js';
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'cli.js');
 const run = (cwd, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
@@ -351,6 +353,52 @@ test('play command: dry run by default, -o writes', () => {
   assert.equal(wrote.status, 0, wrote.stderr);
   assert.match(fs.readFileSync(path.join(dir, 'filled.csv'), 'utf8'), /PSL_CRASH_LOGS,true/);
   assert.equal(run(dir, 'play').status, 2, 'usage without a file');
+});
+
+test('expo config plugin merges into ios.privacyManifests and check trusts it', () => {
+  const dir = fixture('plugin');
+  write(dir, {
+    'package.json': { name: 'ExpoApp', dependencies: { expo: '58.0.0', 'lib-a': '1.0.0', '@sentry/react-native': '6.0.0' } },
+    'app.json': { expo: { name: 'ExpoApp', plugins: [['rn-privacy', {}]] } },
+    'node_modules/expo/package.json': { name: 'expo', version: '58.0.0' },
+    'node_modules/lib-a/package.json': { name: 'lib-a', version: '1.0.0' },
+    'node_modules/lib-a/ios/A.swift': 'UserDefaults.standard.set(1, forKey: "k")\nlet k: URLResourceKey = .volumeAvailableCapacityKey',
+    'node_modules/@sentry/react-native/package.json': { name: '@sentry/react-native', version: '6.0.0' },
+  });
+
+  const mine = { NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryUserDefaults', NSPrivacyAccessedAPITypeReasons: ['1C8F.1'] };
+  const input = { name: 'ExpoApp', ios: { bundleIdentifier: 'x', privacyManifests: { NSPrivacyAccessedAPITypes: [mine] } }, _internal: { projectRoot: dir } };
+  const out = withRnPrivacy(input);
+  assert.equal(out.ios.bundleIdentifier, 'x');
+  const types = Object.fromEntries(out.ios.privacyManifests.NSPrivacyAccessedAPITypes.map((t) => [t.NSPrivacyAccessedAPIType, t.NSPrivacyAccessedAPITypeReasons]));
+  assert.deepEqual(types.NSPrivacyAccessedAPICategoryUserDefaults, ['1C8F.1', 'CA92.1'], 'keeps your reason and adds the scanned one');
+  assert.ok(types.NSPrivacyAccessedAPICategoryDiskSpace);
+  assert.ok(out.ios.privacyManifests.NSPrivacyCollectedDataTypes.some((d) => d.NSPrivacyCollectedDataType === 'NSPrivacyCollectedDataTypeCrashData'));
+  assert.deepEqual(input.ios.privacyManifests.NSPrivacyAccessedAPITypes, [mine], 'input config not mutated');
+
+  const bad = { ios: { privacyManifests: { NSPrivacyTracking: 'yes' } }, _internal: { projectRoot: dir } };
+  const warn = console.warn; let warned = '';
+  console.warn = (m) => { warned += m; };
+  try { assert.equal(withRnPrivacy(bad), bad, 'invalid manifest left unchanged'); } finally { console.warn = warn; }
+  assert.match(warned, /invalid/);
+
+  const check = run(dir, 'check');
+  assert.equal(check.status, 0, check.stderr);
+  assert.match(check.stdout, /Expo plugin adds all 2/);
+  assert.match(run(dir, 'ios').stdout, /You do not need --write/);
+
+  // With a stale ios folder, check points to prebuild.
+  write(dir, { 'ios/ExpoApp.xcodeproj/project.pbxproj': '', 'ios/ExpoApp/PrivacyInfo.xcprivacy': manifestXml([['NSPrivacyAccessedAPICategoryUserDefaults', 'CA92.1']]) });
+  const stale = run(dir, 'check');
+  assert.equal(stale.status, 1);
+  assert.match(stale.stderr, /Missing required reason API: Disk space/);
+  assert.match(stale.stderr, /npx expo prebuild/);
+});
+
+test('public API works from ESM imports', () => {
+  for (const name of ['scanProject', 'analyze', 'mergeManifest', 'validateManifest', 'fillPlayCsv', 'findRule', 'DATA_TYPES']) {
+    assert.ok(api[name], `${name} is exported`);
+  }
 });
 
 test('--help and unknown command', () => {
