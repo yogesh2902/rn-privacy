@@ -153,6 +153,8 @@ export interface ScanResult {
   projectType: 'bare' | 'expo-managed' | 'expo-prebuild' | 'unknown';
   packages: PackageReport[];
   missingPackages: string[];
+  /** The project uses Yarn Plug'n'Play (no node_modules), which React Native does not support. */
+  yarnPnp: boolean;
   /** The app's own Android permissions (manifest, app.json, merged manifest of the last build). */
   android: import('./android.js').AppAndroid;
 }

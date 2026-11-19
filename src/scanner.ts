@@ -25,6 +25,14 @@ interface PkgJson {
   devDependencies?: Record<string, string>;
 }
 
+/** The nearest file or folder with this name in dir or a parent folder (monorepos keep it at the root). */
+function findUp(dir: string, name: string): string | null {
+  for (let d = path.resolve(dir); ; d = path.dirname(d)) {
+    if (fs.existsSync(path.join(d, name))) return path.join(d, name);
+    if (path.dirname(d) === d) return null;
+  }
+}
+
 /** The package's issue tracker: `bugs`, or `<repository>/issues` for GitHub, GitLab and Bitbucket. */
 export function issuesUrl(pkg: PkgJson): string | undefined {
   const bugs = typeof pkg.bugs === 'string' ? pkg.bugs : pkg.bugs?.url;
@@ -233,6 +241,7 @@ export function scanProject(projectDir: string): ScanResult {
     packages: [],
     missingPackages: [],
     android: readAppAndroid(projectDir),
+    yarnPnp: findUp(projectDir, '.pnp.cjs') !== null && findUp(projectDir, 'node_modules') === null,
   };
 
   const seen = new Set<string>();

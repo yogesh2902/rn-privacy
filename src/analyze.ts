@@ -153,8 +153,12 @@ export function analyze(scan: ScanResult): Analysis {
         'Some libraries collect data used for tracking. On iOS you must ask for App Tracking Transparency permission, set NSPrivacyTracking to true and list the tracking domains in NSPrivacyTrackingDomains. rn-privacy never turns this on for you.',
     });
   }
-  for (const name of scan.missingPackages) {
-    warnings.push({ pkg: name, message: 'Listed in package.json but not installed. Run your package manager install, then scan again.' });
+  if (scan.yarnPnp) {
+    warnings.push({ message: 'This project uses Yarn Plug\'n\'Play, which React Native does not support, so there is no node_modules to scan. Add `nodeLinker: node-modules` to .yarnrc.yml, run `yarn install`, then scan again.' });
+  } else {
+    for (const name of scan.missingPackages) {
+      warnings.push({ pkg: name, message: 'Listed in package.json but not installed. Run your package manager install, then scan again.' });
+    }
   }
 
   return {

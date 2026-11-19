@@ -633,6 +633,43 @@ test('snapshot and diff, from a file and from a git ref', () => {
   assert.equal(run(dir, 'diff', '--base', 'no-such-ref').status, 1);
 });
 
+test('package layouts: pnpm symlinks, workspaces, Yarn Plug\'n\'Play', () => {
+  // pnpm: node_modules/<pkg> is a symlink into .pnpm, and its dependencies are siblings there.
+  const pnpm = fixture('pnpm');
+  const store = 'node_modules/.pnpm';
+  write(pnpm, {
+    'package.json': { name: 'App', dependencies: { expo: '54.0.0' } },
+    [`${store}/expo@54.0.0/node_modules/expo/package.json`]: { name: 'expo', version: '54.0.0', dependencies: { 'expo-file-system': '19.0.0' } },
+    [`${store}/expo-file-system@19.0.0/node_modules/expo-file-system/package.json`]: { name: 'expo-file-system', version: '19.0.0' },
+    [`${store}/expo-file-system@19.0.0/node_modules/expo-file-system/expo-module.config.json`]: { platforms: ['apple'] },
+    [`${store}/expo-file-system@19.0.0/node_modules/expo-file-system/ios/F.swift`]: 'let k: URLResourceKey = .volumeAvailableCapacityKey',
+  });
+  fs.symlinkSync(path.join(pnpm, store, 'expo@54.0.0/node_modules/expo'), path.join(pnpm, 'node_modules/expo'), 'dir');
+  fs.symlinkSync(path.join(pnpm, store, 'expo-file-system@19.0.0/node_modules/expo-file-system'), path.join(pnpm, store, 'expo@54.0.0/node_modules/expo-file-system'), 'dir');
+  const a = analyze(scanProject(pnpm));
+  assert.deepEqual(a.apis.map((x) => [x.category, x.packages]), [['NSPrivacyAccessedAPICategoryDiskSpace', ['expo-file-system']]], 'transitive module found through the pnpm store');
+
+  // npm/yarn workspaces: dependencies hoisted to the monorepo root.
+  const mono = fixture('mono');
+  write(mono, {
+    'package.json': { name: 'mono', private: true, workspaces: ['apps/*'] },
+    'apps/mobile/package.json': { name: 'mobile', dependencies: { 'fs-lib': '1.0.0' } },
+    'node_modules/fs-lib/package.json': { name: 'fs-lib', version: '1.0.0' },
+    'node_modules/fs-lib/fs-lib.podspec': '',
+    'node_modules/fs-lib/ios/F.m': 'NSDictionary *a = x[NSFileSystemFreeSize];',
+  });
+  const m = analyze(scanProject(path.join(mono, 'apps/mobile')));
+  assert.deepEqual(m.apis.map((x) => x.packages), [['fs-lib']]);
+  assert.equal(m.warnings.length, 0);
+
+  // Yarn Plug'n'Play: one clear message instead of "not installed" for every package.
+  const pnp = fixture('pnp');
+  write(pnp, { 'package.json': { name: 'App', dependencies: { a: '1', b: '1' } }, '.pnp.cjs': '' });
+  const w = analyze(scanProject(pnp)).warnings;
+  assert.equal(w.length, 1);
+  assert.match(w[0].message, /nodeLinker: node-modules/);
+});
+
 test('issuesUrl understands the usual package.json forms', () => {
   assert.equal(issuesUrl({ bugs: 'https://x.dev/bugs' }), 'https://x.dev/bugs');
   assert.equal(issuesUrl({ bugs: { url: 'https://x.dev/b' } }), 'https://x.dev/b');
