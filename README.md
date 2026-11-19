@@ -93,7 +93,7 @@ Sensitive data your app can read
 | `play <file.csv>` | Fills in the Data safety CSV exported from Play Console. Dry run unless `-o filled.csv`. `--include-conditional` as for `ios`. |
 | `check` | `--format json` for CI tools. Exit code 1 if a required reason API category is missing from your manifest, or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
 
-| `audit` | Checks the privacy manifests your libraries ship: invalid files, missing manifests, missing categories, tracking. `--strict` exits with code 1 on a problem. `--format json` for machines. |
+| `audit` | Checks the privacy manifests your libraries ship: invalid files, missing manifests, missing categories, tracking. `--suggest` writes a fixed manifest and an issue text for each library. `--strict` exits with code 1 on a problem. `--format json` for machines. |
 | `snapshot` | Writes `privacy-snapshot.json`: required reason APIs, collected data, tracking domains, Android permissions and native library versions. Commit it. |
 | `diff` | Privacy changes since the snapshot. `--base origin/main` compares with the snapshot on another branch. `--strict` exits with code 1 on a change. `--format json`. |
 
@@ -155,6 +155,23 @@ branch. The GitHub Action shows the diff in the job summary and warns when the s
 manifest of your last Android build). Permissions you remove with `tools:node="remove"` or
 `expo.android.blockedPermissions` are left out. `play` reminds you of the Advertising ID declaration when
 `AD_ID` is present.
+
+### Fix your libraries
+
+```bash
+npx rn-privacy audit --suggest
+```
+
+For each library with a privacy manifest problem, rn-privacy writes a folder in `rn-privacy-suggestions/` with:
+
+- **`PrivacyInfo.xcprivacy`**: the corrected file. Invalid data types, purposes and reasons are removed, the API
+  categories the code uses are added, and tracking domains become domain names. It passes the same validation as
+  `check`.
+- **`ISSUE.md`**: a ready-to-post issue with what was found, where in the code, the suggested file, and links to
+  Apple's lists. The output tells you where to post it.
+
+Nothing is guessed. A missing purpose is only filled from rn-privacy's rule for that library (which comes from the
+vendor's documentation), and anything rn-privacy cannot know is listed under "Please decide" for the maintainer.
 
 ### Tracking
 
@@ -254,24 +271,35 @@ keeps the exit code (0 when everything is covered, 1 otherwise):
 ### GitHub Action
 
 ```yaml
-- uses: actions/checkout@v4
-- run: npm ci
-- uses: yogesh2902/rn-privacy@v0.4.0
+jobs:
+  privacy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # to comment on pull requests
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - uses: yogesh2902/rn-privacy@v0.4.0
 ```
 
-It runs `rn-privacy check`, fails the job when the manifest is missing something or is invalid, shows each
-problem as an annotation on the pull request, and writes the result, the library audit and the store privacy
-answers to the job summary.
+It runs `rn-privacy check`, fails the job when the manifest is missing something or is invalid, and shows each
+problem as an annotation. On pull requests it posts **one comment** with the result and the privacy changes
+since `privacy-snapshot.json`, and updates it on every push. It only comments when the check fails or something
+changed, so passing pull requests stay quiet. The job summary also has the library audit and the store privacy
+answers.
 
 | Input | Default | |
 | --- | --- | --- |
-| `project-path` | `.` | Folder with the app's `package.json` (for monorepos). |
+| `project-path` | `.` | Folder with the app's `package.json`. In a monorepo, use one step per app: each gets its own comment. |
 | `version` | `latest` | rn-privacy version to run. |
 | `fail-on-error` | `true` | Set to `false` to only report. |
+| `comment` | `true` | Comment on pull requests. Needs `pull-requests: write`. Pull requests from forks get a read-only token, so the action warns instead. |
 | `summary` | `true` | Write the job summary. |
 | `annotations` | `true` | Annotate the pull request. |
+| `github-token` | `github.token` | Token for the comment. |
 
-The `result` output is `pass` or `fail`.
+Outputs: `result` (`pass` or `fail`), `privacy-changes` (`true` or `false`) and `comment-id`.
 
 ### Use it in other CI
 
@@ -289,6 +317,12 @@ into `ios/`. Run `check` after prebuild in CI to verify what actually ships:
 - run: npx expo prebuild --platform ios --no-install
 - run: npx rn-privacy check
 ```
+
+## Package managers and monorepos
+
+npm, Yarn (with `node_modules`) and pnpm all work, including workspaces where dependencies are hoisted to the
+repository root: run rn-privacy in the app's folder or pass `--project apps/mobile`. Yarn Plug'n'Play is not
+supported, because React Native itself needs `nodeLinker: node-modules`.
 
 ## How it works
 

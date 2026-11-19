@@ -12,6 +12,14 @@
 - **`snapshot` and `diff`:** commit `privacy-snapshot.json`, and `diff` shows new APIs, data, tracking domains,
   permissions and library versions. `--base <git ref>`, `--strict`, `--format json`. The GitHub Action shows the
   diff in the job summary.
+- **`audit --suggest`:** for each library with a problem, a corrected `PrivacyInfo.xcprivacy` (it passes
+  validation) and a ready-to-post `ISSUE.md` with the findings, evidence and Apple's lists. Nothing is guessed:
+  open questions are listed for the maintainer.
+- **Pull request comments:** the GitHub Action posts the result and the privacy diff as one comment per app,
+  updated on every push, only when the check fails or something changed. New outputs `privacy-changes` and
+  `comment-id`.
+- **pnpm and monorepos:** verified with real pnpm installs (including transitive Expo modules) and npm workspaces
+  with hoisted dependencies. Yarn Plug'n'Play gets one clear message (React Native needs `nodeLinker: node-modules`).
 - **Releases publish from GitHub** with npm trusted publishing, so packages carry a provenance statement
   (see RELEASING.md).
 - SDK tracking domains are normalized to domain names (Adjust lists URLs). The CLI reads its version from
