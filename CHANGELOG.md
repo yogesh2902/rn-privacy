@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0
+- **10 more SDK rules**, each from the vendor's own source: CleverTap, Braze, Klaviyo, Adjust, Singular and
+  Intercom (from the privacy manifests they publish), MoEngage (manifests and docs), Microsoft Clarity,
+  LogRocket and Luciq/Instabug (vendor docs; what the docs leave out is stated in the rule's notes).
+- **Prebuilt binaries are scanned.** Closed-source SDKs (`.xcframework`, `.framework`, `.a`) in node_modules and
+  `ios/Pods` are searched for the exact symbol names of the required reason APIs. Works on Linux CI too.
+- **Android permissions.** `scan`, `report`, `play` and JSON list sensitive permissions from library manifests,
+  your app's manifest, `expo.android.permissions` and the merged manifest of your last build, minus those you
+  remove. `play` reminds you of the Advertising ID declaration.
+- **`snapshot` and `diff`:** commit `privacy-snapshot.json`, and `diff` shows new APIs, data, tracking domains,
+  permissions and library versions. `--base <git ref>`, `--strict`, `--format json`. The GitHub Action shows the
+  diff in the job summary.
+- **Releases publish from GitHub** with npm trusted publishing, so packages carry a provenance statement
+  (see RELEASING.md).
+- SDK tracking domains are normalized to domain names (Adjust lists URLs). The CLI reads its version from
+  package.json.
+
 ## 0.3.0
 - **`rn-privacy audit`:** checks the privacy manifests your libraries ship. It finds invalid manifests (made-up
   data types, empty purposes, unreadable files), libraries that use required reason APIs without a manifest,

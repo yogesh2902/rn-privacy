@@ -14,7 +14,8 @@ import { buildSnapshot, changeCount, diffSnapshots, formatDiff, loadBaseSnapshot
 import { c, formatAudit, formatMarkdown, formatScan, toJson } from './report.js';
 import { scanProject } from './scanner.js';
 
-const VERSION = '0.3.0';
+// Read from package.json so a release only needs one version bump.
+const VERSION: string = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
 
 const HELP = `${c.bold('rn-privacy')} ${VERSION}
 Privacy manifest and store privacy forms for React Native and Expo apps.
@@ -46,7 +47,7 @@ ${c.bold('Options')}
 
 ${c.bold('Also')}
   Expo plugin    Add "plugins": ["rn-privacy"] to app.json to update the manifest on every prebuild
-  GitHub Action  uses: yogesh2902/rn-privacy@v0.3.0 checks every pull request
+  GitHub Action  uses: yogesh2902/rn-privacy@v0.4.0 checks every pull request
   Docs           https://github.com/yogesh2902/rn-privacy
 `;
 

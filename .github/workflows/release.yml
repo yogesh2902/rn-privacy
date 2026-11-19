@@ -1,0 +1,33 @@
+name: release
+# Publishes to npm when a GitHub release is published, using npm trusted publishing (OIDC):
+# no npm token is stored anywhere, and npm adds a provenance statement to the package.
+# Setup and release steps: RELEASING.md.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # lets GitHub prove to npm that this workflow is publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      # Trusted publishing needs npm 11.5.1 or later.
+      - run: npm install -g npm@^11.5.1
+      - run: npm ci
+      - name: Check the release tag matches package.json
+        run: |
+          version="v$(node -p "require('./package.json').version")"
+          if [ "$version" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::Release tag $GITHUB_REF_NAME does not match package.json ($version)."
+            exit 1
+          fi
+      # prepublishOnly runs the build and the tests first.
+      - run: npm publish

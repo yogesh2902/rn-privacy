@@ -17,6 +17,7 @@ npx rn-privacy report -o store-privacy.md  # answers for both store forms
 npx rn-privacy play data_safety.csv -o filled.csv  # fill Google Play's Data safety CSV
 npx rn-privacy check      # for CI: fails if the manifest is missing something or invalid
 npx rn-privacy audit      # problems in the privacy manifests your libraries ship
+npx rn-privacy diff       # privacy changes since your committed privacy-snapshot.json
 ```
 
 **Expo?** Add the config plugin and the manifest is generated on every prebuild, so it never falls behind:
@@ -30,11 +31,17 @@ npx rn-privacy audit      # problems in the privacy manifests your libraries shi
 ## What it does
 
 - **Finds Apple "required reason" APIs** (User defaults, File timestamps, System boot time, Disk space,
-  Active keyboards) by scanning the iOS source code of every native dependency, and by reading the
-  privacy manifests libraries ship. Missing these gets your upload rejected (`ITMS-91053`).
+  Active keyboards) by scanning the iOS source code of every native dependency, the prebuilt binaries
+  (`.xcframework`, `.framework`, `.a`) closed-source SDKs ship, and the privacy manifests libraries include.
+  Missing these gets your upload rejected (`ITMS-91053`).
 - **Knows what popular SDKs collect** (Firebase, Sentry, AdMob, Meta, Mixpanel, Amplitude, PostHog,
-  Segment, RevenueCat, OneSignal, AppsFlyer, Branch, BugSnag, Datadog...) and maps it to both Apple's
-  and Google's categories.
+  Segment, RevenueCat, OneSignal, AppsFlyer, Branch, Adjust, Singular, CleverTap, MoEngage, Braze, Klaviyo,
+  Intercom, Luciq/Instabug, LogRocket, Microsoft Clarity, BugSnag, Datadog...) and maps it to both Apple's
+  and Google's categories. Rules come from each vendor's own privacy manifest or documentation.
+- **Lists Android permissions** your libraries and your app add (location, camera, contacts, the Advertising
+  ID...), including those from Gradle dependencies once you have built the app, for the Data safety form.
+- **Shows privacy changes in pull requests.** Commit `privacy-snapshot.json` and `diff` tells reviewers when a
+  dependency change needs a new declaration.
 - **Reads `ios/Pods`** after `pod install`, so the native SDKs that CocoaPods downloads are covered too.
 - **Merges, never overwrites.** Existing entries in your manifest are kept; it only adds what is missing.
   Dry run by default.
@@ -87,6 +94,8 @@ Sensitive data your app can read
 | `check` | `--format json` for CI tools. Exit code 1 if a required reason API category is missing from your manifest, or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
 
 | `audit` | Checks the privacy manifests your libraries ship: invalid files, missing manifests, missing categories, tracking. `--strict` exits with code 1 on a problem. `--format json` for machines. |
+| `snapshot` | Writes `privacy-snapshot.json`: required reason APIs, collected data, tracking domains, Android permissions and native library versions. Commit it. |
+| `diff` | Privacy changes since the snapshot. `--base origin/main` compares with the snapshot on another branch. `--strict` exits with code 1 on a change. `--format json`. |
 
 All commands accept `--project <dir>` (default: current folder).
 
@@ -111,6 +120,41 @@ rn-privacy audit  (18 native libraries, 6 ship a privacy manifest)
 rn-privacy already adds everything these libraries use to **your** app's manifest, so your upload is covered.
 The audit is about the libraries themselves: reporting a problem fixes it for every app that uses them.
 Results come from static analysis, so look at the file before you open an issue.
+
+### Privacy changes in pull requests
+
+```bash
+npx rn-privacy snapshot   # writes privacy-snapshot.json: commit it
+```
+
+The snapshot lists what your dependencies need. It has no dates or paths, so it only changes when something
+real changes. When a pull request adds or updates a library, run `rn-privacy diff`:
+
+```
+rn-privacy diff  (against privacy-snapshot.json)
+
+Required reason APIs (Apple privacy manifest)
+  + Disk space               react-native-fs
+
+Android permissions
+  + Photos                   react-native-image-picker
+
+Native libraries
+  ~ @sentry/react-native     6.0.0 → 6.1.0
+  + react-native-fs          2.20.0
+```
+
+Update your manifest and store answers, then run `rn-privacy snapshot` again and commit it: reviewers see the
+privacy impact in the snapshot's diff. `rn-privacy diff --base origin/main` compares with the snapshot on another
+branch. The GitHub Action shows the diff in the job summary and warns when the snapshot is out of date.
+
+### Android permissions
+
+`scan` and `report` list the sensitive Android permissions in your app and where each comes from: a library's
+`AndroidManifest.xml`, your app's manifest or `expo.android.permissions`, or a Gradle dependency (from the merged
+manifest of your last Android build). Permissions you remove with `tools:node="remove"` or
+`expo.android.blockedPermissions` are left out. `play` reminds you of the Advertising ID declaration when
+`AD_ID` is present.
 
 ### Tracking
 
@@ -212,7 +256,7 @@ keeps the exit code (0 when everything is covered, 1 otherwise):
 ```yaml
 - uses: actions/checkout@v4
 - run: npm ci
-- uses: yogesh2902/rn-privacy@v0.3.0
+- uses: yogesh2902/rn-privacy@v0.4.0
 ```
 
 It runs `rn-privacy check`, fails the job when the manifest is missing something or is invalid, shows each
@@ -272,15 +316,16 @@ into your app's manifest.
   disclosure page: `rn-privacy report` lists them at the end. Check them.
 - `rn-privacy ios` will not edit a manifest that `check` reports as invalid. Fix those entries by hand first:
   it only adds entries and never changes or removes yours.
-- `NSPrivacyTracking` and `NSPrivacyTrackingDomains` are never switched on automatically. If you use ad or
-  attribution SDKs, set them yourself together with App Tracking Transparency.
-- Prebuilt binary frameworks inside `node_modules` cannot be scanned. You get a warning when one ships
-  without a privacy manifest.
+- `NSPrivacyTracking` and `NSPrivacyTrackingDomains` are only switched on with `--tracking`.
+- Prebuilt binaries are searched for the exact names of the required reason APIs. Binaries over 300 MB are
+  skipped with a warning. Static analysis can miss dynamic calls or report code that never runs.
+- Android permissions added by Gradle dependencies only appear after you build the Android app once.
 
 ## Contributing rules
 
 The rules database is the most valuable part of this project. To add or fix a library, edit
-[`src/rules.ts`](src/rules.ts), link the vendor's official disclosure page in `sources`, and run `npm test`.
+[`src/rules.ts`](src/rules.ts), link the vendor's official disclosure page or its published `PrivacyInfo.xcprivacy` in `sources`, and run
+`npm test`. Only add what the source says.
 
 Required reason APIs are never taken from rules: they come from scanning the installed code, so they always
 match the version you have. Rules only describe **data collection**. If that changed between versions of a
