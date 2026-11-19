@@ -115,7 +115,8 @@ export interface ApiUsage {
 
 export type ApiEvidence =
   | { kind: 'manifest'; file: string }
-  | { kind: 'source'; file: string; symbol: string };
+  | { kind: 'source'; file: string; symbol: string }
+  | { kind: 'binary'; file: string; symbol: string };
 
 export interface PackageReport {
   name: string;
@@ -136,6 +137,8 @@ export interface PackageReport {
   issuesUrl?: string;
   /** <uses-permission> entries in the package's android/src/main/AndroidManifest.xml. */
   androidPermissions: string[];
+  /** Prebuilt binaries too large to scan for required reason APIs. */
+  unscannedBinaries: string[];
 }
 
 export interface ManifestIssue {

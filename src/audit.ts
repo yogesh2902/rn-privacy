@@ -35,7 +35,7 @@ const ref = (p: PackageReport): LibraryRef => ({ pkg: p.name, version: p.version
 
 /** "ios/Foo.m (stat)" for the first few places a category was found in source code. */
 function sourceEvidence(p: PackageReport, category: ApiCategory): string[] {
-  return (p.apis.get(category)?.evidence ?? []).flatMap((e) => (e.kind === 'source' ? [`${e.file} (${e.symbol})`] : []));
+  return (p.apis.get(category)?.evidence ?? []).flatMap((e) => (e.kind === 'manifest' ? [] : [`${e.file} (${e.symbol})`]));
 }
 
 export function audit(scan: ScanResult): Audit {
@@ -56,7 +56,8 @@ export function audit(scan: ScanResult): Audit {
     if (errors.length) result.invalid.push({ ...ref(p), issues: errors });
     if (warnings.length) result.questionable.push({ ...ref(p), issues: warnings });
 
-    const fromSource = [...p.apis].filter(([, u]) => u.evidence.some((e) => e.kind === 'source')).map(([c]) => c);
+    // Found in source code or in a prebuilt binary.
+    const fromSource = [...p.apis].filter(([, u]) => u.evidence.some((e) => e.kind !== 'manifest')).map(([c]) => c);
     if (!p.shipsManifest.length && !errors.length && fromSource.length) {
       result.undeclared.push({ ...ref(p), categories: fromSource, evidence: fromSource.flatMap((c) => sourceEvidence(p, c)).slice(0, 3) });
     } else if (p.shipsManifest.length) {

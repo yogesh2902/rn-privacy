@@ -128,8 +128,8 @@ export function analyze(scan: ScanResult): Analysis {
       sources.push({ pkg: pkg.name, version: pkg.version, versions: pkg.rule.versions, urls: pkg.rule.sources, notes: pkg.rule.notes });
     }
 
-    if (pkg.hasBinaryFramework && !pkg.shipsManifest.length) {
-      warnings.push({ pkg: pkg.name, message: 'Contains a prebuilt binary framework that cannot be scanned and no privacy manifest was found. Check the vendor documentation.' });
+    if (pkg.unscannedBinaries.length && !pkg.shipsManifest.length) {
+      warnings.push({ pkg: pkg.name, message: `Contains a prebuilt binary too large to scan (${pkg.unscannedBinaries[0]}) and no privacy manifest. Check the vendor documentation.` });
     }
   }
 

@@ -6,6 +6,7 @@ import { findRule } from './rules.js';
 import type { ApiCategory, ApiEvidence, PackageReport, ScanResult } from './types.js';
 import { validateManifest } from './validate.js';
 import { libraryManifestPath, readAndroidManifest, readAppAndroid } from './android.js';
+import { isAppleBinary, scanBinary, SKIP_SLICE } from './binary.js';
 
 const SKIP_DIRS = new Set([
   'node_modules', 'android', 'example', 'examples', 'Example', 'Examples', 'sample', 'samples',
@@ -99,10 +100,12 @@ interface WalkResult {
   manifests: string[];
   sources: string[];
   binaryFramework: boolean;
+  /** Files that may be prebuilt binaries (inside .framework/.xcframework, or .a/.dylib), iOS slices only. */
+  binaries: string[];
 }
 
 function walk(pkgDir: string): WalkResult {
-  const result: WalkResult = { manifests: [], sources: [], binaryFramework: false };
+  const result: WalkResult = { manifests: [], sources: [], binaryFramework: false, binaries: [] };
   const stack = [pkgDir];
   while (stack.length) {
     const dir = stack.pop()!;
@@ -126,9 +129,14 @@ function walk(pkgDir: string): WalkResult {
         continue;
       }
       const ext = path.extname(entry.name);
-      const rel = path.relative(pkgDir, full).split(path.sep);
+      const relPath = path.relative(pkgDir, full);
+      const rel = relPath.split(path.sep);
       const inAppleDir = rel.some((p) => p === 'ios' || p === 'apple' || p === 'macos');
       if (APPLE_SOURCE.has(ext) || (C_SOURCE.has(ext) && inAppleDir)) result.sources.push(full);
+      const inFramework = rel.some((p) => p.endsWith('.framework') || p.endsWith('.xcframework'));
+      if (((inFramework && ext === '') || ext === '.a' || (inFramework && ext === '.dylib')) && !SKIP_SLICE.test(relPath)) {
+        result.binaries.push(full);
+      }
     }
   }
   return result;
@@ -150,6 +158,7 @@ export function scanPackage(name: string, pkgDir: string): PackageReport {
     trackingDomains: [],
     issuesUrl: issuesUrl(pkg),
     androidPermissions: readAndroidManifest(libraryManifestPath(pkgDir))?.uses ?? [],
+    unscannedBinaries: [],
   };
   if (!report.hasIosNative) return report;
 
@@ -178,7 +187,26 @@ export function scanPackage(name: string, pkgDir: string): PackageReport {
       add(hit.category, [], { kind: 'source', file: path.relative(pkgDir, file), symbol: hit.symbol });
     }
   }
+  scanBinaries(report, files.binaries, pkgDir);
   return report;
+}
+
+/** Add required reason APIs found in prebuilt binaries. */
+function scanBinaries(report: PackageReport, files: string[], baseDir: string) {
+  for (const file of files) {
+    if (!isAppleBinary(file)) continue;
+    const rel = path.relative(baseDir, file);
+    const hits = scanBinary(file);
+    if (!hits) {
+      report.unscannedBinaries.push(rel);
+      continue;
+    }
+    for (const hit of hits) {
+      let entry = report.apis.get(hit.category);
+      if (!entry) report.apis.set(hit.category, (entry = { reasons: new Set(), evidence: [] }));
+      if (entry.evidence.filter((e) => e.kind === 'binary').length < 3) entry.evidence.push({ kind: 'binary', file: rel, symbol: hit.symbol });
+    }
+  }
 }
 
 function detectProjectType(projectDir: string, pkg: PkgJson): ScanResult['projectType'] {
@@ -256,8 +284,8 @@ export function scanPods(projectDir: string): PackageReport[] {
   for (const pod of pods) {
     if (!pod.isDirectory() || ['Target Support Files', 'Local Podspecs', 'Headers', 'Pods.xcodeproj'].includes(pod.name)) continue;
     const podDir = path.join(podsDir, pod.name);
-    const { manifests } = walk(podDir);
-    if (!manifests.length) continue;
+    const { manifests, binaries } = walk(podDir);
+    if (!manifests.length && !binaries.length) continue;
     const report: PackageReport = {
       name: `${pod.name} (CocoaPods)`,
       version: '-',
@@ -270,8 +298,12 @@ export function scanPods(projectDir: string): PackageReport[] {
       declaresTracking: false,
       trackingDomains: [],
       androidPermissions: [],
+      unscannedBinaries: [],
     };
     for (const file of manifests) readLibraryManifest(report, file, path.relative(podsDir, file));
+    scanBinaries(report, binaries, podsDir);
+    // A pod with neither a manifest nor any required reason API has nothing to report.
+    if (!manifests.length && !report.apis.size && !report.unscannedBinaries.length) continue;
     reports.push(report);
   }
   return reports;

@@ -18,6 +18,7 @@ import withRnPrivacy from '../app.plugin.js';
 import * as api from '../dist/index.js';
 import { audit } from '../dist/audit.js';
 import { issuesUrl } from '../dist/scanner.js';
+import { isAppleBinary, scanBinary } from '../dist/binary.js';
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'cli.js');
 const run = (cwd, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
@@ -556,6 +557,39 @@ test('tracking domains from SDK manifests are normalized to domain names', () =>
   const a = analyze(scanProject(dir));
   assert.deepEqual(a.tracking[0].domains, ['consent.example.com', 't.example.com']);
   assert.match(audit(scanProject(dir)).invalid[0].issues[0].message, /must be a domain name only/, 'audit still reports the URL in the SDK');
+});
+
+test('binary: finds required reason APIs in prebuilt frameworks', () => {
+  // A 64-bit Mach-O header followed by a string table, and a static library (ar archive).
+  const macho = Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(28), Buffer.from('\0_mach_absolute_time\0_OBJC_CLASS_$_NSUserDefaults\0_strlen\0', 'latin1')]);
+  const archive = Buffer.from('!<arch>\n...\0_statfs\0activeInputModes\0', 'latin1');
+  const lookalike = Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.from('\0_status\0_stat_helper\0', 'latin1')]);
+  const dir = fixture('binary');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'bin-sdk': '1.0.0' } },
+    'node_modules/bin-sdk/package.json': { name: 'bin-sdk', version: '1.0.0' },
+    'node_modules/bin-sdk/bin-sdk.podspec': '',
+    'node_modules/bin-sdk/ios/Sdk.xcframework/Info.plist': '<plist/>',
+    // Simulator and macOS slices never ship in an iOS build, so they are skipped.
+    'node_modules/bin-sdk/ios/Sdk.xcframework/ios-arm64_x86_64-simulator/Sdk.framework/Sdk': '\0_stat\0',
+  });
+  const put = (rel, buf) => { fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true }); fs.writeFileSync(path.join(dir, rel), buf); };
+  put('node_modules/bin-sdk/ios/Sdk.xcframework/ios-arm64/Sdk.framework/Sdk', macho);
+  put('node_modules/bin-sdk/ios/libextra.a', archive);
+  put('node_modules/bin-sdk/ios/Sdk.xcframework/ios-arm64/Sdk.framework/Lookalike', lookalike);
+
+  assert.equal(isAppleBinary(path.join(dir, 'node_modules/bin-sdk/ios/libextra.a')), true);
+  assert.equal(isAppleBinary(path.join(dir, 'node_modules/bin-sdk/package.json')), false);
+  assert.deepEqual(scanBinary(path.join(dir, 'node_modules/bin-sdk/ios/Sdk.xcframework/ios-arm64/Sdk.framework/Lookalike')), [], 'exact names only');
+
+  const a = analyze(scanProject(dir));
+  assert.deepEqual(a.apis.map((x) => x.category.replace('NSPrivacyAccessedAPICategory', '')).sort(), ['ActiveKeyboards', 'DiskSpace', 'SystemBootTime', 'UserDefaults'], 'simulator slice (stat) skipped');
+  const lib = audit(scanProject(dir)).undeclared.find((x) => x.pkg === 'bin-sdk');
+  assert.ok(lib, 'binary-only use without a manifest is reported');
+  assert.ok(lib.categories.includes('NSPrivacyAccessedAPICategorySystemBootTime'));
+  const pkg = scanProject(dir).packages.find((p) => p.name === 'bin-sdk');
+  const boot = pkg.apis.get('NSPrivacyAccessedAPICategorySystemBootTime').evidence;
+  assert.deepEqual(boot, [{ kind: 'binary', file: path.join('ios', 'Sdk.xcframework', 'ios-arm64', 'Sdk.framework', 'Sdk'), symbol: 'mach_absolute_time' }]);
 });
 
 test('issuesUrl understands the usual package.json forms', () => {
