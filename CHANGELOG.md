@@ -26,6 +26,15 @@
   Adjust, Branch, OneSignal, RevenueCat, Braze, CleverTap and MoEngage. `report` gets a Shared column and marks
   answers derived from iOS with †; `play` ticks "shared" and the sharing purposes, and leaves purposes the vendor
   does not state for you to choose.
+- **`rn-privacy init`:** one command sets a project up: the Expo plugin in `app.json` (or the privacy manifest in a
+  bare app), `rn-privacy.config.json`, `privacy-snapshot.json` and a GitHub workflow for your package manager
+  (npm, Yarn, pnpm, Bun) and monorepo layout. Dry run unless `--write`; it never overwrites a file.
+- **`report --format appstore`:** the App Privacy answers in the order App Store Connect asks for them, with the
+  library behind each "linked" and "tracking" Yes.
+- **`report --format inventory`:** the data the app collects, why, and which services receive it, in plain words,
+  for whoever writes the privacy policy.
+- **Rule freshness:** a weekly workflow compares the newest privacy manifests SDK vendors publish with a baseline
+  and checks the vendor links, and opens an issue when a rule needs a review.
 - **Your own rules in `rn-privacy.config.json`:** describe in-house or private SDKs (npm packages, CocoaPods pods
   or Swift packages), replace a built-in rule, or declare data your app itself collects (a rule without
   `packages`). The file is checked strictly, with a fix for each problem, and `config.schema.json` gives editors

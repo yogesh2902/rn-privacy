@@ -14,6 +14,9 @@ import { suggestFixes, suggestionIssue, suggestionManifest } from './suggest.js'
 import { buildSnapshot, changeCount, diffSnapshots, formatDiff, loadBaseSnapshot, SNAPSHOT_FILE, snapshotText } from './snapshot.js';
 import { c, formatAudit, formatMarkdown, formatScan, toJson } from './report.js';
 import { scanProject } from './scanner.js';
+import { applyInit, planInit } from './init.js';
+import { formatAppStore } from './appstore.js';
+import { formatInventory } from './inventory.js';
 
 // Read from package.json so a release only needs one version bump.
 const VERSION: string = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
@@ -25,6 +28,7 @@ ${c.bold('Usage')}
   rn-privacy [command] [options]
 
 ${c.bold('Commands')}
+  init      Set up a project: Expo plugin or privacy manifest, your rules file, snapshot, GitHub workflow
   scan      Show what your dependencies collect and which Apple APIs they use (default)
   ios       Update your PrivacyInfo.xcprivacy (bare) or app.json (Expo). Dry run unless --write
   report    Answers for App Store Connect "App Privacy" and Google Play "Data safety"
@@ -36,13 +40,15 @@ ${c.bold('Commands')}
 
 ${c.bold('Options')}
   -p, --project <dir>       App folder (default: current folder)
-  -w, --write               (ios) Write the changes instead of only showing them
-      --include-conditional (ios, play) Also declare data collected only in some setups
+  -w, --write               (init, ios) Write the changes instead of only showing them
+      --include-conditional (ios, play, report -f appstore) Also declare data collected only in some setups
       --tracking            (ios) Your app tracks users: set NSPrivacyTracking and add your libraries' tracking domains
       --strict              (audit, diff) Exit with code 1 when there is a problem or a change
       --suggest             (audit) Write a fixed PrivacyInfo.xcprivacy and an issue text for each library
       --base <file|ref>     (diff) Snapshot to compare with: a file, or a git ref such as origin/main
-  -f, --format <md|json>    (report, scan, audit, check, diff) Output format (default: md for report)
+  -f, --format <format>     md or json (report, scan, audit, check, diff). For report also:
+                              appstore   App Store Connect answers, step by step
+                              inventory  what is collected, by whom and why, for your privacy policy
   -o, --out <file>          (report, play, snapshot) Write to a file instead of the terminal; (audit --suggest) folder
   -h, --help                Show this help
   -v, --version             Show the version
@@ -78,7 +84,7 @@ function main(argv: string[]): number {
 
   const command = positionals[0] ?? 'scan';
   const projectDir = path.resolve(values.project ?? process.cwd());
-  if (!['scan', 'ios', 'report', 'play', 'check', 'audit', 'snapshot', 'diff'].includes(command)) {
+  if (!['init', 'scan', 'ios', 'report', 'play', 'check', 'audit', 'snapshot', 'diff'].includes(command)) {
     console.error(`Unknown command "${command}".\n\n${HELP}`);
     return 2;
   }
@@ -88,11 +94,45 @@ function main(argv: string[]): number {
   const apis = toApiUsages(analysis);
 
   switch (command) {
+    case 'init': {
+      const plan = planInit(projectDir, scan, analysis, VERSION);
+      const write = !!values.write;
+      print(c.bold('rn-privacy init') + c.dim(`  (${scan.projectType})`) + '\n');
+      const mark = { create: c.green('+'), update: c.green('~'), done: c.dim('✓'), manual: c.yellow('!') };
+      const width = Math.min(44, Math.max(...plan.steps.map((s) => s.file.length)));
+      for (const step of plan.steps) {
+        const line = `  ${mark[step.status]} ${step.file.padEnd(width)}  ${step.status === 'done' ? c.dim(step.what) : step.what}`;
+        print(line);
+        if (step.todo) print(c.yellow(`    ${step.todo}`));
+      }
+      const pending = plan.steps.filter((s) => s.status === 'create' || s.status === 'update');
+      if (!write) {
+        print(pending.length ? c.dim(`\nDry run. Run \`rn-privacy init --write\` to ${pending.length === 1 ? 'make this change' : `make these ${pending.length} changes`}.`) : c.green('\nAlready set up.'));
+        return 0;
+      }
+      const written = applyInit(plan);
+      if (written.length) print(c.green(`\nWrote ${written.length} file${written.length === 1 ? '' : 's'}. Commit ${written.length === 1 ? 'it' : 'them'}.`));
+      else print(c.green('\nAlready set up.'));
+      if (plan.next.length) {
+        print(c.bold('\nNext'));
+        for (const n of plan.next) print(`  ${n}`);
+      }
+      return 0;
+    }
+
     case 'scan':
       return print(values.format === 'json' ? JSON.stringify(toJson(scan, analysis), null, 2) : formatScan(scan, analysis));
 
     case 'report': {
-      const text = values.format === 'json' ? JSON.stringify(toJson(scan, analysis), null, 2) : formatMarkdown(scan, analysis);
+      const format = values.format ?? 'md';
+      if (!['md', 'json', 'appstore', 'inventory'].includes(format)) {
+        console.error(`Unknown format "${format}" for report. Use md, json, appstore or inventory.`);
+        return 2;
+      }
+      const text = format === 'json' ? JSON.stringify(toJson(scan, analysis), null, 2)
+        : format === 'appstore' ? formatAppStore(scan, analysis, !!values['include-conditional']).trimEnd()
+        : format === 'inventory' ? formatInventory(scan, analysis).trimEnd()
+        : formatMarkdown(scan, analysis);
       if (values.out) {
         fs.writeFileSync(path.resolve(values.out), text + '\n');
         return print(c.green(`Wrote ${values.out}`));

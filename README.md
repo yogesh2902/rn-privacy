@@ -11,9 +11,12 @@ Every iOS release needs a correct `PrivacyInfo.xcprivacy`, and both stores ask w
 libraries (Firebase, Sentry, AdMob...), not by your own code. `rn-privacy` scans them and tells you what to declare.
 
 ```bash
+npx rn-privacy init --write  # set everything up: Expo plugin or manifest, snapshot, GitHub workflow
 npx rn-privacy            # what your libraries collect and which Apple APIs they use
 npx rn-privacy ios --write  # update PrivacyInfo.xcprivacy (bare) or app.json (Expo)
 npx rn-privacy report -o store-privacy.md  # answers for both store forms
+npx rn-privacy report -f appstore  # App Store Connect's App Privacy form, step by step
+npx rn-privacy report -f inventory  # what is collected, by whom and why, for your privacy policy
 npx rn-privacy play data_safety.csv -o filled.csv  # fill Google Play's Data safety CSV
 npx rn-privacy check      # for CI: fails if the manifest is missing something or invalid
 npx rn-privacy audit      # problems in the privacy manifests your libraries ship
@@ -90,12 +93,12 @@ Sensitive data your app can read
 
 | Command | What it does |
 | --- | --- |
+| `init` | Sets a project up: adds the Expo plugin to `app.json` (or writes `PrivacyInfo.xcprivacy` in a bare app), creates `rn-privacy.config.json`, `privacy-snapshot.json` and a GitHub workflow. Dry run unless `--write`. It never overwrites a file: running it again only reports what is already set up. |
 | `scan` (default) | Prints required reason APIs, collected data, sensitive device access and warnings. `--format json` for machines. |
 | `ios` | Shows what it would add to your manifest. `--write` saves it. `--include-conditional` also declares data that is only collected in some setups (e.g. after `Sentry.setUser()`). `--tracking` sets `NSPrivacyTracking` and adds your libraries' tracking domains. |
-| `report` | Markdown (or `--format json`) with tables for App Store Connect and Google Play. `-o file.md` to save. |
+| `report` | Markdown (or `--format json`) with tables for App Store Connect and Google Play. `--format appstore`: the App Privacy answers in the order App Store Connect asks for them. `--format inventory`: the data, services and purposes for your privacy policy. `-o file.md` to save. |
 | `play <file.csv>` | Fills in the Data safety CSV exported from Play Console. Dry run unless `-o filled.csv`. `--include-conditional` as for `ios`. |
 | `check` | `--format json` for CI tools. Exit code 1 if a required reason API category is missing from your manifest, or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
-
 | `audit` | Checks the privacy manifests your libraries ship: invalid files, missing manifests, missing categories, tracking. `--suggest` writes a fixed manifest and an issue text for each library. `--strict` exits with code 1 on a problem. `--format json` for machines. |
 | `snapshot` | Writes `privacy-snapshot.json`: required reason APIs, collected data, tracking domains, Android permissions and native library versions. Commit it. |
 | `diff` | Privacy changes since the snapshot. `--base origin/main` compares with the snapshot on another branch. `--strict` exits with code 1 on a change. `--format json`. |
@@ -260,6 +263,37 @@ npx rn-privacy ios --write --tracking
 This sets `NSPrivacyTracking` to true and adds every tracking domain your libraries declare. rn-privacy never
 turns tracking on without `--tracking`. With the Expo plugin, use `["rn-privacy", { "tracking": true }]`.
 `check` warns when tracking is on but a library's tracking domain is missing.
+
+### Set up in one command
+
+```bash
+npx rn-privacy init           # shows what it will do
+npx rn-privacy init --write   # does it
+```
+
+| | Expo | Bare React Native |
+| --- | --- | --- |
+| Privacy manifest | Adds `"rn-privacy"` to `expo.plugins` in `app.json`, so every prebuild writes it | Creates or updates `ios/<App>/PrivacyInfo.xcprivacy` |
+| `rn-privacy.config.json` | Created empty, ready for [your own rules](#your-own-rules) | same |
+| `privacy-snapshot.json` | What your dependencies need today, so [pull requests show changes](#privacy-changes-in-pull-requests) | same |
+| `.github/workflows/privacy.yml` | The [GitHub Action](#github-action) on every pull request, installing with your package manager (npm, Yarn, pnpm or Bun) and pointing at the app's folder in a monorepo | same |
+
+Files that exist are left alone. `init` then lists what is left: installing `rn-privacy` as a dev dependency
+when the Expo plugin needs it, and adding a new manifest to your Xcode target.
+
+### App Store Connect, step by step
+
+`rn-privacy report --format appstore` writes the App Privacy answers in the order App Store Connect asks for them:
+whether you collect data, which data types to tick (by category), then for each type the purposes, whether it is
+linked to the user, and whether it is used for tracking, naming the library that makes each answer Yes. Data that
+is only collected in some setups is listed separately (or included with `--include-conditional`).
+
+### Data inventory for your privacy policy
+
+`rn-privacy report --format inventory` lists each kind of data the app collects, why (in one set of plain words
+for both stores), which services receive it with links to their privacy pages, the tracking domains and the
+device data the app can access. Hand it to whoever writes your privacy policy. It is facts only, not legal text,
+and it says what it cannot know (your servers, data you send to SDKs yourself).
 
 ### Google Play Data safety
 
@@ -437,6 +471,12 @@ The rules database is the most valuable part of this project. To add or fix a li
 [`src/rules.ts`](src/rules.ts), link the vendor's official disclosure page or its published `PrivacyInfo.xcprivacy` in `sources`, and run
 `npm test`. Only add what the source says. If the vendor publishes a Google Play Data safety disclosure for its
 Android SDK, add it under `android` with Play's purposes and `shared` where the vendor says so.
+
+A weekly workflow ([`rule-freshness.yml`](.github/workflows/rule-freshness.yml)) downloads the newest version
+of every SDK with a rule and the manifests the rules link to on GitHub, and compares them with
+[`scripts/rules-baseline.json`](scripts/rules-baseline.json). When a vendor changes what it declares, or a vendor
+link disappears, it opens an issue. After reviewing the rule, run `node scripts/rule-freshness.mjs --update` and
+commit the baseline.
 
 Required reason APIs are never taken from rules: they come from scanning the installed code, so they always
 match the version you have. Rules only describe **data collection**. If that changed between versions of a

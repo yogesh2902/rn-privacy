@@ -1,0 +1,208 @@
+{
+  "manifests": {
+    "@bugsnag/react-native/ios/vendor/bugsnag-cocoa/Bugsnag/resources/PrivacyInfo.xcprivacy": {
+      "rule": "BugSnag",
+      "source": "npm:@bugsnag/react-native",
+      "version": "9.1.0",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "CrashData (AppFunctionality)",
+          "DeviceID (AppFunctionality)",
+          "OtherDataTypes (AppFunctionality)",
+          "ProductInteraction (AppFunctionality)",
+          "UserID (AppFunctionality)"
+        ]
+      }
+    },
+    "@segment/analytics-react-native/ios/PrivacyInfo.xcprivacy": {
+      "rule": "Segment",
+      "source": "npm:@segment/analytics-react-native",
+      "version": "2.24.2",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "AdvertisingData (DeveloperAdvertising)",
+          "App Name (DeveloperAdvertising)",
+          "App Version (DeveloperAdvertising)",
+          "DeviceID (no purpose, linked)"
+        ]
+      }
+    },
+    "https://github.com/segmentio/analytics-react-native/blob/master/packages/core/ios/PrivacyInfo.xcprivacy": {
+      "rule": "Segment",
+      "source": "https://github.com/segmentio/analytics-react-native/blob/master/packages/core/ios/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "AdvertisingData (DeveloperAdvertising)",
+          "App Name (DeveloperAdvertising)",
+          "App Version (DeveloperAdvertising)",
+          "DeviceID (no purpose, linked)"
+        ]
+      }
+    },
+    "https://github.com/CleverTap/clevertap-ios-sdk/blob/master/CleverTapSDK/PrivacyInfo.xcprivacy": {
+      "rule": "CleverTap",
+      "source": "https://github.com/CleverTap/clevertap-ios-sdk/blob/master/CleverTapSDK/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "DeviceID (AppFunctionality+ProductPersonalization, linked)",
+          "ProductInteraction (Analytics+ProductPersonalization, linked)",
+          "UserID (AppFunctionality+ProductPersonalization, linked)"
+        ]
+      }
+    },
+    "https://github.com/braze-inc/braze-swift-sdk/blob/main/Sources/BrazeKitResources/Resources/PrivacyInfo.xcprivacy": {
+      "rule": "Braze",
+      "source": "https://github.com/braze-inc/braze-swift-sdk/blob/main/Sources/BrazeKitResources/Resources/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "DeviceID (Analytics+AppFunctionality+ProductPersonalization, linked)",
+          "ProductInteraction (Analytics+AppFunctionality+ProductPersonalization, linked)",
+          "UserID (Analytics+AppFunctionality+ProductPersonalization, linked)"
+        ]
+      }
+    },
+    "https://github.com/klaviyo/klaviyo-swift-sdk/blob/master/Sources/KlaviyoSwift/PrivacyInfo.xcprivacy": {
+      "rule": "Klaviyo",
+      "source": "https://github.com/klaviyo/klaviyo-swift-sdk/blob/master/Sources/KlaviyoSwift/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "DeviceID (Analytics+DeveloperAdvertising+ProductPersonalization, linked)",
+          "ProductInteraction (Analytics, linked)",
+          "UserID (Analytics+DeveloperAdvertising+ProductPersonalization, linked)"
+        ]
+      }
+    },
+    "https://github.com/moengage/MoEngage-iOS-SDK-Beta/blob/master/Frameworks/MoEngageSDK.xcframework/ios-arm64/MoEngageSDK.framework/PrivacyInfo.xcprivacy": {
+      "rule": "MoEngage",
+      "source": "https://github.com/moengage/MoEngage-iOS-SDK-Beta/blob/master/Frameworks/MoEngageSDK.xcframework/ios-arm64/MoEngageSDK.framework/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "DeviceID (Analytics+AppFunctionality+ProductPersonalization, linked)",
+          "ProductInteraction (Analytics+AppFunctionality+ProductPersonalization, tracking)",
+          "UserID (Analytics+AppFunctionality+ProductPersonalization, linked)"
+        ]
+      }
+    },
+    "https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/blob/master/Sources/Resources/PrivacyInfo.xcprivacy": {
+      "rule": "Branch",
+      "source": "https://github.com/BranchMetrics/ios-branch-deep-linking-attribution/blob/master/Sources/Resources/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": true,
+        "domains": [
+          "api-safetrack-eu.branch.io",
+          "api-safetrack.branch.io"
+        ],
+        "collected": [
+          "DeviceID (Analytics+DeveloperAdvertising+ThirdPartyAdvertising, linked, tracking)",
+          "OtherDataTypes (AppFunctionality)",
+          "PerformanceData (AppFunctionality)"
+        ]
+      }
+    },
+    "https://github.com/adjust/ios_sdk/blob/master/Adjust/PrivacyInfo.xcprivacy": {
+      "rule": "Adjust",
+      "source": "https://github.com/adjust/ios_sdk/blob/master/Adjust/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": true,
+        "domains": [
+          "https://consent.adjust.cn",
+          "https://consent.adjust.com",
+          "https://consent.adjust.io",
+          "https://consent.adjust.net.in",
+          "https://consent.adjust.world",
+          "https://consent.eu.adjust.com",
+          "https://consent.tr.adjust.com",
+          "https://consent.us.adjust.com"
+        ],
+        "collected": [
+          "DeviceID (Analytics+ThirdPartyAdvertising, linked, tracking)",
+          "ProductInteraction (Analytics)"
+        ]
+      }
+    },
+    "https://github.com/singular-labs/Singular-iOS-SDK/blob/main/Sources/Singular/PrivacyInfo.xcprivacy": {
+      "rule": "Singular",
+      "source": "https://github.com/singular-labs/Singular-iOS-SDK/blob/main/Sources/Singular/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": true,
+        "domains": [
+          "safetrack.singular.net"
+        ],
+        "collected": [
+          "DeviceID (Analytics+DeveloperAdvertising+ThirdPartyAdvertising, linked, tracking)"
+        ]
+      }
+    },
+    "expo-notifications/ios/PrivacyInfo.xcprivacy": {
+      "rule": "Expo Notifications",
+      "source": "npm:expo-notifications",
+      "version": "58.1.9",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": []
+      }
+    },
+    "https://github.com/intercom/intercom-ios/blob/master/Intercom.xcframework/ios-arm64/Intercom.framework/PrivacyInfo.xcprivacy": {
+      "rule": "Intercom",
+      "source": "https://github.com/intercom/intercom-ios/blob/master/Intercom.xcframework/ios-arm64/Intercom.framework/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "EmailAddress (AppFunctionality, linked)",
+          "OtherDiagnosticData (AppFunctionality)",
+          "PerformanceData (AppFunctionality)",
+          "PhotosorVideos (AppFunctionality, linked)",
+          "UserID (AppFunctionality, linked)"
+        ]
+      }
+    }
+  },
+  "versions": {
+    "@react-native-firebase/analytics": "27.1.1",
+    "@react-native-firebase/crashlytics": "27.1.1",
+    "@react-native-firebase/messaging": "27.1.1",
+    "@react-native-firebase/perf": "27.1.1",
+    "@react-native-firebase/auth": "27.1.1",
+    "@sentry/react-native": "8.36.0",
+    "@bugsnag/react-native": "9.1.0",
+    "@datadog/mobile-react-native": "3.12.0",
+    "@segment/analytics-react-native": "2.24.2",
+    "mixpanel-react-native": "4.1.0",
+    "@amplitude/analytics-react-native": "1.13.2",
+    "posthog-react-native": "4.87.0",
+    "clevertap-react-native": "4.5.0",
+    "@braze/react-native-sdk": "24.0.1",
+    "klaviyo-react-native-sdk": "2.7.0",
+    "react-native-moengage": "13.2.0",
+    "@microsoft/react-native-clarity": "4.9.2",
+    "@logrocket/react-native": "3.17.1",
+    "react-native-google-mobile-ads": "17.4.0",
+    "react-native-fbsdk-next": "13.4.3",
+    "react-native-appsflyer": "7.0.4",
+    "react-native-branch": "7.0.0",
+    "react-native-adjust": "5.8.1",
+    "singular-react-native": "4.3.1",
+    "react-native-onesignal": "5.5.17",
+    "expo-notifications": "58.1.9",
+    "react-native-purchases": "11.0.4",
+    "@intercom/intercom-react-native": "10.10.0",
+    "@luciq/react-native": "19.13.0",
+    "instabug-reactnative": "16.0.3"
+  }
+}

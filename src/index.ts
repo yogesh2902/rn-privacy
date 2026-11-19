@@ -23,3 +23,7 @@ export type { ProjectConfig } from './config.js';
 export { findSwiftPackages, parsePackageResolved, pbxprojPackages } from './spm.js';
 export type { SwiftPackage, SwiftPackages } from './spm.js';
 export { scanSwiftPackages } from './scanner.js';
+export { planInit, applyInit, workflowYaml, detectPackageManager } from './init.js';
+export type { InitPlan, InitStep } from './init.js';
+export { formatAppStore, ASC_TYPES, ASC_PURPOSES } from './appstore.js';
+export { formatInventory } from './inventory.js';

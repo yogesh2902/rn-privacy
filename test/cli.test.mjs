@@ -934,3 +934,130 @@ test('rules: Play disclosures for BugSnag, Clarity, Singular and Luciq', () => {
     assert.ok(rule.android.sources.every((s) => s.startsWith('https://')), pkg);
   }
 });
+
+test('init: plans, writes once, and never overwrites', () => {
+  const dir = fixture('init');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { expo: '52.0.0', '@sentry/react-native': '6.0.0' } },
+    'package-lock.json': '{}',
+    'app.json': { expo: { name: 'App', plugins: ['expo-router'] } },
+    'node_modules/@sentry/react-native/package.json': { name: '@sentry/react-native', version: '6.0.0' },
+    'node_modules/expo/package.json': { name: 'expo', version: '52.0.0' },
+  });
+  fs.mkdirSync(path.join(dir, '.git'));
+  const dry = run(dir, 'init');
+  assert.equal(dry.status, 0);
+  assert.match(dry.stdout, /Dry run/);
+  assert.ok(!fs.existsSync(path.join(dir, 'rn-privacy.config.json')), 'dry run writes nothing');
+
+  const r = run(dir, 'init', '--write');
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'app.json'), 'utf8')).expo.plugins, ['expo-router', 'rn-privacy']);
+  assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dir, 'rn-privacy.config.json'), 'utf8')).rules, []);
+  assert.ok(fs.existsSync(path.join(dir, 'privacy-snapshot.json')));
+  const wf = fs.readFileSync(path.join(dir, '.github/workflows/privacy.yml'), 'utf8');
+  assert.match(wf, /pull-requests: write/);
+  assert.match(wf, /- run: npm ci/);
+  assert.match(wf, /uses: yogesh2902\/rn-privacy@v\d+\.\d+\.\d+/);
+  assert.match(r.stdout, /npm install --save-dev rn-privacy/, 'the Expo plugin needs the package installed');
+  assert.equal(run(dir, 'check').status, 0, 'check passes right after init');
+
+  // Second run: everything done, nothing changed.
+  fs.writeFileSync(path.join(dir, 'rn-privacy.config.json'), '{ "rules": [] }\n');
+  const again = run(dir, 'init', '--write');
+  assert.match(again.stdout, /Already set up/);
+  assert.equal(fs.readFileSync(path.join(dir, 'rn-privacy.config.json'), 'utf8'), '{ "rules": [] }\n');
+});
+
+test('init: bare app in a pnpm monorepo', () => {
+  const repo = fixture('init-mono');
+  const app = path.join(repo, 'apps', 'mobile');
+  write(repo, { 'pnpm-lock.yaml': '', 'package.json': { name: 'root', private: true } });
+  write(app, {
+    'package.json': { name: 'mobile', dependencies: { 'react-native': '0.76.0', 'native-lib': '1.0.0' } },
+    'node_modules/native-lib/package.json': { name: 'native-lib', version: '1.0.0' },
+    'node_modules/native-lib/native-lib.podspec': '',
+    'node_modules/native-lib/ios/A.m': '[NSUserDefaults standardUserDefaults];',
+    'ios/Mobile.xcodeproj/project.pbxproj': '',
+    'ios/Mobile/AppDelegate.mm': '',
+  });
+  fs.mkdirSync(path.join(repo, '.git'));
+  const r = run(app, 'init', '--write');
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(fs.readFileSync(path.join(app, 'ios/Mobile/PrivacyInfo.xcprivacy'), 'utf8'), /CA92\.1/);
+  assert.match(r.stdout, /add ios\/Mobile\/PrivacyInfo\.xcprivacy to your app target/);
+  const wf = fs.readFileSync(path.join(repo, '.github/workflows/privacy.yml'), 'utf8');
+  assert.match(wf, /pnpm\/action-setup/);
+  assert.match(wf, /pnpm install --frozen-lockfile/);
+  assert.match(wf, /project-path: apps\/mobile/);
+  assert.doesNotMatch(wf, /working-directory/, 'pnpm installs from the repository root');
+});
+
+const ascFixture = () => {
+  const dir = fixture('asc');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { '@segment/analytics-react-native': '2.21.0', 'react-native-branch': '6.0.0', '@sentry/react-native': '6.0.0' } },
+    'node_modules/@segment/analytics-react-native/package.json': { name: '@segment/analytics-react-native', version: '2.21.0' },
+    'node_modules/react-native-branch/package.json': { name: 'react-native-branch', version: '6.0.0' },
+    'node_modules/@sentry/react-native/package.json': { name: '@sentry/react-native', version: '6.0.0' },
+    'rn-privacy.config.json': { rules: [{ name: 'Sign-in', collects: [{ type: 'email', purposes: ['app-functionality'], linked: true, tracking: false }] }] },
+  });
+  return dir;
+};
+
+test('report --format appstore: App Store Connect answers in order, with who makes each Yes', () => {
+  const dir = ascFixture();
+  const r = run(dir, 'report', '--format', 'appstore');
+  assert.equal(r.status, 0, r.stderr);
+  const md = r.stdout;
+  assert.match(md, /collect data from this app\?" \*\*Yes\*\*/);
+  assert.match(md, /- \*\*Contact Info\*\*: Email Address/);
+  assert.match(md, /- \*\*Identifiers\*\*: Device ID/);
+  assert.ok(md.indexOf('### Email Address') < md.indexOf('### Device ID'), 'App Store Connect order');
+  const device = md.slice(md.indexOf('### Device ID'), md.indexOf('###', md.indexOf('### Device ID') + 4));
+  // Segment links device IDs but does not track; Branch does both.
+  assert.match(device, /Linked to the user's identity\? \*\*Yes\*\* \(because of @segment\/analytics-react-native, react-native-branch\)/);
+  assert.match(device, /Used for tracking\? \*\*Yes\*\* \(because of react-native-branch\)/);
+  assert.match(md, /## Only if you use these features[\s\S]*User ID/);
+  assert.match(md, /App Tracking Transparency/);
+  const all = run(dir, 'report', '-f', 'appstore', '--include-conditional').stdout;
+  assert.match(all, /### User ID/);
+  assert.doesNotMatch(all, /## Only if you use these features/);
+  assert.equal(run(dir, 'report', '-f', 'nope').status, 2);
+});
+
+test('report --format inventory: data, services and purposes in plain words', () => {
+  const md = run(ascFixture(), 'report', '--format', 'inventory').stdout;
+  assert.match(md, /^# Data inventory/);
+  assert.match(md, /\| Email address \| App features \| Sign-in \| iOS, Android \| Yes \| No \| No \|/);
+  assert.match(md, /\| Segment \| `@segment\/analytics-react-native` \|/);
+  assert.match(md, /## Collected by your own app[\s\S]*\*\*Sign-in\*\*: Email address/);
+  assert.doesNotMatch(md, /\| Sign-in \| `/, 'the app itself is not a third party');
+  assert.doesNotMatch(md, /Third-party advertising|Advertising or marketing/, 'one set of purpose words');
+});
+
+test('rule freshness: manifest summaries, tarballs and changes', async () => {
+  const fresh = await import('../scripts/rule-freshness.mjs');
+  const xml = libManifest('<key>NSPrivacyTracking</key><true/><key>NSPrivacyTrackingDomains</key><array><string>b.example</string><string>a.example</string></array>');
+  const s = fresh.summarizeManifest(xml);
+  assert.deepEqual(s, { tracking: true, domains: ['a.example', 'b.example'], collected: [] });
+  assert.deepEqual(fresh.summarizeManifest('nope'), { invalid: true });
+  assert.equal(fresh.rawGithubUrl('https://github.com/a/b/blob/main/x/PrivacyInfo.xcprivacy'), 'https://raw.githubusercontent.com/a/b/main/x/PrivacyInfo.xcprivacy');
+
+  const dir = fixture('tgz');
+  write(dir, { 'package/ios/PrivacyInfo.xcprivacy': xml, 'package/index.js': '' });
+  execFileSync('tar', ['-czf', 'pkg.tgz', 'package'], { cwd: dir });
+  const files = fresh.readTarGz(fs.readFileSync(path.join(dir, 'pkg.tgz')), (n) => path.basename(n) === 'PrivacyInfo.xcprivacy');
+  assert.deepEqual(Object.keys(files), ['ios/PrivacyInfo.xcprivacy']);
+
+  const base = { manifests: { k: { rule: 'X', source: 'npm:x', version: '1.0.0', summary: s } } };
+  assert.deepEqual(fresh.compare(base, { manifests: { k: { ...base.manifests.k } }, checked: ['npm:x'] }), []);
+  const changed = fresh.compare(base, { manifests: { k: { rule: 'X', source: 'npm:x', version: '2.0.0', summary: { ...s, domains: ['a.example'], tracking: false } } }, checked: ['npm:x'] });
+  assert.equal(changed.length, 1);
+  assert.match(changed[0].text, /NSPrivacyTracking: true → false/);
+  assert.match(changed[0].text, /- tracking domain b\.example/);
+  assert.deepEqual(fresh.compare(base, { manifests: {}, checked: ['npm:x'] }).map((c) => c.kind), ['removed']);
+  assert.deepEqual(fresh.compare(base, { manifests: {}, checked: [] }), [], 'a failed download is not a removal');
+  const baseline = JSON.parse(fs.readFileSync(fresh.BASELINE, 'utf8'));
+  assert.ok(Object.keys(baseline.manifests).length >= 10, 'the committed baseline covers the vendor manifests');
+});
