@@ -1,6 +1,7 @@
 import { API_CATEGORIES, DEFAULT_REASONS } from './apis.js';
 import type { ApiCategory, ApiUsage, CollectedData, DataType, Purpose, ScanResult } from './types.js';
 import { SDK_ONLY_REASONS } from './validate.js';
+import { SENSITIVE_PERMISSIONS } from './android.js';
 
 export interface ApiFinding {
   category: ApiCategory;
@@ -34,6 +35,37 @@ export interface Analysis {
   sources: { pkg: string; version: string; versions?: string; urls: string[]; notes?: string }[];
   /** Libraries whose own manifest declares tracking or tracking domains. */
   tracking: { pkg: string; declaresTracking: boolean; domains: string[] }[];
+  /** Sensitive Android permissions and who adds them. Permissions the app removes are left out. */
+  android: AndroidFinding[];
+}
+
+export interface AndroidFinding {
+  permission: string;
+  label: string;
+  type?: DataType;
+  note?: string;
+  /** Libraries, "your app", or "a Gradle dependency" (only seen in the merged manifest). */
+  sources: string[];
+}
+
+export const APP_SOURCE = 'your app';
+export const GRADLE_SOURCE = 'a Gradle dependency';
+
+function androidFindings(scan: ScanResult): AndroidFinding[] {
+  const removed = new Set(scan.android.removed);
+  const map = new Map<string, Set<string>>();
+  const add = (perm: string, source: string) => {
+    if (!SENSITIVE_PERMISSIONS[perm] || removed.has(perm)) return;
+    if (!map.has(perm)) map.set(perm, new Set());
+    map.get(perm)!.add(source);
+  };
+  for (const pkg of scan.packages) for (const perm of pkg.androidPermissions) add(perm, pkg.name);
+  for (const perm of scan.android.declared) add(perm, APP_SOURCE);
+  // The merged manifest of the last build also has what Gradle dependencies add. It can be older than
+  // node_modules, so it only adds to the list; it never removes anything.
+  for (const perm of scan.android.merged ?? []) if (!map.has(perm)) add(perm, GRADLE_SOURCE);
+  return [...map].map(([permission, sources]) => ({ permission, ...SENSITIVE_PERMISSIONS[permission], sources: [...sources] }))
+    .sort((a, b) => a.label.localeCompare(b.label));
 }
 
 /** Every tracking domain your libraries declare, without duplicates. */
@@ -131,6 +163,7 @@ export function analyze(scan: ScanResult): Analysis {
     access: [...accessMap.entries()].map(([type, packages]) => ({ type, packages })),
     warnings,
     tracking,
+    android: androidFindings(scan),
     sources,
   };
 }

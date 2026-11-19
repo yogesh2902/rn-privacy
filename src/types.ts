@@ -134,6 +134,8 @@ export interface PackageReport {
   trackingDomains: string[];
   /** Where to report problems: the package's issue tracker, if it has one. */
   issuesUrl?: string;
+  /** <uses-permission> entries in the package's android/src/main/AndroidManifest.xml. */
+  androidPermissions: string[];
 }
 
 export interface ManifestIssue {
@@ -148,4 +150,6 @@ export interface ScanResult {
   projectType: 'bare' | 'expo-managed' | 'expo-prebuild' | 'unknown';
   packages: PackageReport[];
   missingPackages: string[];
+  /** The app's own Android permissions (manifest, app.json, merged manifest of the last build). */
+  android: import('./android.js').AppAndroid;
 }

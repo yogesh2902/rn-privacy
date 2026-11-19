@@ -50,6 +50,16 @@ export function formatScan(scan: ScanResult, a: Analysis): string {
     lines.push('');
   }
 
+  if (a.android.length) {
+    lines.push(c.bold('Android permissions'), c.dim('  Google Play: declare the data in Data safety if it leaves the device.'));
+    for (const p of a.android) {
+      lines.push(`  ${p.label.padEnd(22)} ${c.dim(`from ${p.sources.join(', ')}`)}`);
+      if (p.note) lines.push(c.yellow(`  ${' '.repeat(22)} ${p.note}`));
+    }
+    if (!scan.android.mergedFile) lines.push(c.dim('  Build the Android app once to also see permissions added by Gradle dependencies (Google Play services...).'));
+    lines.push('');
+  }
+
   if (a.tracking.length) {
     lines.push(c.bold('Tracking declared by your libraries'));
     for (const t of a.tracking) {
@@ -201,6 +211,15 @@ export function formatMarkdown(scan: ScanResult, a: Analysis): string {
     '',
   );
 
+  if (a.android.length) {
+    out.push('### Android permissions', '');
+    out.push('A permission means your app can read the data. Declare it above only if the data leaves the device.', '');
+    out.push('| Permission | Added by | Note |', '| --- | --- | --- |');
+    for (const p of a.android) out.push(`| ${p.label} (\`${p.permission.split('.').pop()}\`) | ${p.sources.join(', ')} | ${p.note ?? ''} |`);
+    out.push('');
+    if (!scan.android.mergedFile) out.push('_Build the Android app once and run the report again to include permissions added by Gradle dependencies._', '');
+  }
+
   // Device access --------------------------------------------------
   if (a.access.length) {
     out.push('## Sensitive data your app can read', '', 'Declare these only if your app sends the data off the device (for example to your server).', '');
@@ -283,5 +302,7 @@ export function toJson(scan: ScanResult, a: Analysis) {
     warnings: a.warnings,
     tracking: a.tracking,
     trackingDomains: trackingDomains(a),
+    android: a.android,
+    androidMergedManifest: scan.android.mergedFile,
   };
 }

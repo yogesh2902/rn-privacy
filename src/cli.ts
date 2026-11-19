@@ -9,6 +9,7 @@ import { readManifest } from './manifest.js';
 import { fillPlayCsv } from './play.js';
 import { validateManifest } from './validate.js';
 import { formatCheck, readExpoPrivacy, runCheck } from './check.js';
+import { AD_ID } from './android.js';
 import { c, formatAudit, formatMarkdown, formatScan, toJson } from './report.js';
 import { scanProject } from './scanner.js';
 
@@ -176,6 +177,9 @@ function main(argv: string[]): number {
       if (analysis.data.some((d) => d.tracking || d.purposes.includes('third-party-advertising'))) {
         print('  - Shared? Ad and attribution SDKs may use data for their own purposes, which counts as sharing. Check the vendor pages in `rn-privacy report`.');
       }
+      const adId = analysis.android.find((p) => p.permission === AD_ID);
+      if (adId) print(`  - Advertising ID: your app uses it (from ${adId.sources.join(', ')}). Answer Yes in App content > Advertising ID.`);
+      for (const p of analysis.android.filter((x) => x.permission !== AD_ID && x.note)) print(`  - ${p.label}: ${p.note}`);
       print('  - Encrypted in transit? Can users request deletion?');
       print('  - Anything your own code or server collects.');
 

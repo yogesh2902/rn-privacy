@@ -512,6 +512,52 @@ test('check --format json', () => {
   assert.equal(empty.manifests.length, 0);
 });
 
+test('android: library, app, merged manifest and removed permissions', () => {
+  const dir = fixture('android');
+  const manifest = (perms, tools = '') => `<manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">\n${perms}\n</manifest>`;
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'geo-lib': '1.0.0', 'plain-lib': '1.0.0' } },
+    'node_modules/geo-lib/package.json': { name: 'geo-lib', version: '1.0.0' },
+    'node_modules/geo-lib/android/src/main/AndroidManifest.xml': manifest('<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />\n<uses-permission android:name="android.permission.INTERNET"/>'),
+    'node_modules/plain-lib/package.json': { name: 'plain-lib', version: '1.0.0' },
+    'android/app/src/main/AndroidManifest.xml': manifest('<uses-permission android:name="android.permission.CAMERA"/>\n<!-- <uses-permission android:name="android.permission.READ_SMS"/> -->\n<uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove"/>'),
+    'android/app/build/intermediates/merged_manifest/release/processReleaseMainManifest/AndroidManifest.xml': manifest('<uses-permission android:name="com.google.android.gms.permission.AD_ID"/>\n<uses-permission android:name="android.permission.RECORD_AUDIO"/>\n<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>'),
+  });
+  const a = analyze(scanProject(dir));
+  const found = Object.fromEntries(a.android.map((p) => [p.permission.split('.').pop(), p.sources]));
+  assert.deepEqual(found, { AD_ID: ['a Gradle dependency'], CAMERA: ['your app'], ACCESS_FINE_LOCATION: ['geo-lib'] }, 'INTERNET is not sensitive, READ_SMS is commented out, RECORD_AUDIO is removed');
+
+  const scan = run(dir, 'scan');
+  assert.match(scan.stdout, /Advertising ID\s+from a Gradle dependency/);
+  assert.match(formatMarkdown(scanProject(dir), a), /### Android permissions/);
+
+  write(dir, { 'app.json': { expo: { android: { blockedPermissions: ['com.google.android.gms.permission.AD_ID'], permissions: ['READ_CONTACTS'] } } } });
+  const b = analyze(scanProject(dir));
+  assert.ok(!b.android.some((p) => p.permission.endsWith('AD_ID')), 'blockedPermissions removes it');
+  assert.ok(b.android.some((p) => p.permission === 'android.permission.READ_CONTACTS'), 'short names from app.json are understood');
+});
+
+test('rules: newly added SDKs are recognized', () => {
+  for (const [pkg, name] of [['clevertap-react-native', 'CleverTap'], ['react-native-moengage', 'MoEngage'], ['@braze/react-native-sdk', 'Braze'], ['react-native-adjust', 'Adjust'], ['singular-react-native', 'Singular'], ['@intercom/intercom-react-native', 'Intercom'], ['@luciq/react-native', 'Luciq (Instabug)'], ['instabug-reactnative', 'Luciq (Instabug)'], ['@logrocket/react-native', 'LogRocket'], ['@microsoft/react-native-clarity', 'Microsoft Clarity'], ['klaviyo-react-native-sdk', 'Klaviyo']]) {
+    const rule = findRule(pkg, '1.0.0');
+    assert.equal(rule?.name, name, pkg);
+    assert.ok(rule.sources.length, `${pkg} has a source`);
+    for (const item of rule.collects ?? []) assert.ok(item.purposes.length, `${pkg} ${item.type} has purposes`);
+  }
+});
+
+test('tracking domains from SDK manifests are normalized to domain names', () => {
+  const dir = fixture('domains');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'attr-sdk': '1.0.0' } },
+    'node_modules/attr-sdk/package.json': { name: 'attr-sdk', version: '1.0.0' },
+    'node_modules/attr-sdk/ios/PrivacyInfo.xcprivacy': libManifest('<key>NSPrivacyTracking</key><true/><key>NSPrivacyTrackingDomains</key><array><string>https://Consent.Example.com/path</string><string>t.example.com</string></array>'),
+  });
+  const a = analyze(scanProject(dir));
+  assert.deepEqual(a.tracking[0].domains, ['consent.example.com', 't.example.com']);
+  assert.match(audit(scanProject(dir)).invalid[0].issues[0].message, /must be a domain name only/, 'audit still reports the URL in the SDK');
+});
+
 test('issuesUrl understands the usual package.json forms', () => {
   assert.equal(issuesUrl({ bugs: 'https://x.dev/bugs' }), 'https://x.dev/bugs');
   assert.equal(issuesUrl({ bugs: { url: 'https://x.dev/b' } }), 'https://x.dev/b');

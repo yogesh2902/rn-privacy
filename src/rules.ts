@@ -164,6 +164,87 @@ export const RULES: LibraryRule[] = [
     notes: 'Session replay (if enabled) can capture screen content.',
   },
 
+  {
+    packages: ['clevertap-react-native'],
+    name: 'CleverTap',
+    // From the PrivacyInfo.xcprivacy in CleverTap's iOS SDK (CleverTapSDK/).
+    collects: [
+      { type: 'user-id', purposes: ['app-functionality', 'product-personalization'], linked: true, tracking: false },
+      { type: 'device-id', purposes: ['app-functionality', 'product-personalization'], linked: true, tracking: false },
+      { type: 'product-interaction', purposes: ['analytics', 'product-personalization'], linked: true, tracking: false },
+    ],
+    sources: ['https://github.com/CleverTap/clevertap-ios-sdk/blob/master/CleverTapSDK/PrivacyInfo.xcprivacy'],
+    notes: 'CleverTap location (CleverTapLocation) ships its own manifest. Anything you send in profile or event properties (email, phone...) must be declared too.',
+  },
+  {
+    packages: ['@braze/react-native-sdk'],
+    name: 'Braze',
+    // From the PrivacyInfo.xcprivacy in BrazeKit (braze-swift-sdk).
+    collects: [
+      { type: 'user-id', purposes: ['product-personalization', 'analytics', 'app-functionality'], linked: true, tracking: false },
+      { type: 'device-id', purposes: ['product-personalization', 'analytics', 'app-functionality'], linked: true, tracking: false },
+      { type: 'product-interaction', purposes: ['product-personalization', 'analytics', 'app-functionality'], linked: true, tracking: false },
+    ],
+    sources: ['https://github.com/braze-inc/braze-swift-sdk/blob/main/Sources/BrazeKitResources/Resources/PrivacyInfo.xcprivacy'],
+    notes: 'Braze location and push stories ship their own manifests. Anything you set on the user profile (email, phone...) must be declared too.',
+  },
+  {
+    packages: ['klaviyo-react-native-sdk'],
+    name: 'Klaviyo',
+    // From the PrivacyInfo.xcprivacy in klaviyo-swift-sdk (Sources/KlaviyoSwift).
+    collects: [
+      { type: 'device-id', purposes: ['analytics', 'product-personalization', 'developer-advertising'], linked: true, tracking: false },
+      { type: 'user-id', purposes: ['product-personalization', 'analytics', 'developer-advertising'], linked: true, tracking: false },
+      { type: 'product-interaction', purposes: ['analytics'], linked: true, tracking: false },
+    ],
+    sources: ['https://github.com/klaviyo/klaviyo-swift-sdk/blob/master/Sources/KlaviyoSwift/PrivacyInfo.xcprivacy'],
+    notes: 'If you pass an email or phone number to Klaviyo, declare it too.',
+  },
+  {
+    packages: ['react-native-moengage'],
+    name: 'MoEngage',
+    // From the PrivacyInfo.xcprivacy files MoEngage publishes (MoEngage-iOS-SDK-Beta) and its privacy manifest docs.
+    collects: [
+      { type: 'user-id', purposes: ['analytics', 'product-personalization', 'app-functionality'], linked: true, tracking: false },
+      { type: 'device-id', purposes: ['analytics', 'product-personalization', 'app-functionality'], linked: true, tracking: false },
+      { type: 'product-interaction', purposes: ['analytics', 'product-personalization', 'app-functionality'], linked: false, tracking: true },
+      { type: 'precise-location', purposes: ['analytics', 'product-personalization', 'app-functionality'], linked: false, tracking: true, conditional: 'Only with the MoEngage Geofence module' },
+      { type: 'coarse-location', purposes: ['analytics', 'product-personalization', 'app-functionality'], linked: false, tracking: true, conditional: 'Only with the MoEngage Geofence module' },
+    ],
+    sources: [
+      'https://www.moengage.com/docs/user-guide/data/privacy/apple-privacy-manifest-update',
+      'https://github.com/moengage/MoEngage-iOS-SDK-Beta/blob/master/Frameworks/MoEngageSDK.xcframework/ios-arm64/MoEngageSDK.framework/PrivacyInfo.xcprivacy',
+    ],
+    notes: 'MoEngage marks product interaction (and location) as used for tracking but sets NSPrivacyTracking to false. Review tracking with App Tracking Transparency in mind.',
+  },
+  {
+    packages: ['@microsoft/react-native-clarity'],
+    name: 'Microsoft Clarity',
+    // From Microsoft's App Store privacy guidance for the Clarity mobile SDK.
+    collects: [
+      { type: 'product-interaction', purposes: ['analytics'], linked: false, tracking: false },
+      { type: 'performance-data', purposes: ['app-functionality'], linked: false, tracking: false },
+      { type: 'coarse-location', purposes: ['analytics'], linked: false, tracking: false, conditional: 'Derived from the IP address' },
+    ],
+    sources: ['https://learn.microsoft.com/en-us/clarity/mobile-sdk/sdk-apple-appstore-privacy-guidance'],
+    notes: 'Microsoft gives "app owner market awareness" as the purpose for location and "SDK stability and performance" for performance data; rn-privacy maps them to Analytics and App functionality.',
+  },
+  {
+    packages: ['@logrocket/react-native'],
+    name: 'LogRocket',
+    // From LogRocket's Apple privacy questionnaire page.
+    collects: [
+      { type: 'product-interaction', purposes: ['analytics', 'app-functionality'], linked: false, tracking: false },
+      { type: 'crash-data', purposes: ['analytics', 'app-functionality'], linked: false, tracking: false },
+      { type: 'performance-data', purposes: ['analytics', 'app-functionality'], linked: false, tracking: false },
+      { type: 'coarse-location', purposes: ['analytics', 'app-functionality'], linked: false, tracking: false, conditional: 'Derived from the IP address; can be turned off when you initialize the SDK' },
+      { type: 'user-id', purposes: ['analytics', 'app-functionality'], linked: true, tracking: false, conditional: 'Only if you identify users' },
+      { type: 'name', purposes: ['analytics', 'app-functionality'], linked: true, tracking: false, conditional: 'Only if you identify users with a name' },
+      { type: 'email', purposes: ['analytics', 'app-functionality'], linked: true, tracking: false, conditional: 'Only if you identify users with an email' },
+    ],
+    sources: ['https://docs.logrocket.com/docs/apple-privacy-questionnaire'],
+    notes: 'LogRocket does not say per data type whether it is linked to the user. If you identify users, session data is tied to them: consider marking it as linked. Session replay can capture whatever is on screen.',
+  },
   // ------------------------------------------------------- Ads / attribution
   {
     packages: ['react-native-google-mobile-ads'],
@@ -221,6 +302,27 @@ export const RULES: LibraryRule[] = [
     notes: 'Branch also answers Yes to "Browsing history" (Apple\'s broad definition) and "Other data" (device metadata) in App Store Connect. Its SDK declares tracking with the domains api-safetrack.branch.io and api-safetrack-eu.branch.io, used only after ATT opt-in. If you only use deep linking, Branch says its data is not used for tracking.',
   },
 
+  {
+    packages: ['react-native-adjust'],
+    name: 'Adjust',
+    // From the PrivacyInfo.xcprivacy in Adjust's iOS SDK (Adjust/).
+    collects: [
+      { type: 'device-id', purposes: ['analytics', 'third-party-advertising'], linked: true, tracking: true },
+      { type: 'product-interaction', purposes: ['analytics'], linked: false, tracking: false },
+    ],
+    sources: ['https://github.com/adjust/ios_sdk/blob/master/Adjust/PrivacyInfo.xcprivacy'],
+    notes: 'Adjust declares tracking and its consent domains (consent.adjust.com and regional variants). Run `rn-privacy ios --write --tracking` if your app uses App Tracking Transparency.',
+  },
+  {
+    packages: ['singular-react-native'],
+    name: 'Singular',
+    // From the PrivacyInfo.xcprivacy in Singular's iOS SDK (Sources/Singular).
+    collects: [
+      { type: 'device-id', purposes: ['third-party-advertising', 'analytics', 'developer-advertising'], linked: true, tracking: true },
+    ],
+    sources: ['https://github.com/singular-labs/Singular-iOS-SDK/blob/main/Sources/Singular/PrivacyInfo.xcprivacy'],
+    notes: 'Singular declares tracking with the domain safetrack.singular.net. Run `rn-privacy ios --write --tracking` if your app uses App Tracking Transparency.',
+  },
   // -------------------------------------------------- Push / purchases / misc
   {
     packages: ['react-native-onesignal'],
@@ -249,6 +351,31 @@ export const RULES: LibraryRule[] = [
     sources: ['https://www.revenuecat.com/docs/platform-resources/apple-platform-resources/apple-app-privacy'],
   },
 
+  {
+    packages: ['@intercom/intercom-react-native'],
+    name: 'Intercom',
+    // From the PrivacyInfo.xcprivacy in Intercom.xcframework (intercom-ios).
+    collects: [
+      { type: 'user-id', purposes: ['app-functionality'], linked: true, tracking: false },
+      { type: 'email', purposes: ['app-functionality'], linked: true, tracking: false },
+      { type: 'photos-videos', purposes: ['app-functionality'], linked: true, tracking: false },
+      { type: 'performance-data', purposes: ['app-functionality'], linked: false, tracking: false },
+      { type: 'other-diagnostic', purposes: ['app-functionality'], linked: false, tracking: false },
+    ],
+    sources: ['https://github.com/intercom/intercom-ios/blob/master/Intercom.xcframework/ios-arm64/Intercom.framework/PrivacyInfo.xcprivacy'],
+  },
+  {
+    packages: ['@luciq/react-native', 'instabug-reactnative'],
+    name: 'Luciq (Instabug)',
+    // From Luciq's "App Privacy Details for iOS" page. It lists what is collected, not purposes, linking or tracking.
+    collects: [
+      { type: 'user-id', purposes: ['app-functionality'], linked: false, tracking: false },
+      { type: 'product-interaction', purposes: ['app-functionality'], linked: false, tracking: false, conditional: 'Only with repro steps or user steps turned on' },
+      { type: 'performance-data', purposes: ['app-functionality'], linked: false, tracking: false, conditional: 'Only with APM or the session profiler' },
+    ],
+    sources: ['https://docs.luciq.ai/ios/setup-luciq-for-ios/custom-settings/privacy-settings/app-privacy-details'],
+    notes: 'Luciq\'s page does not state purposes, linking or tracking: rn-privacy assumes App functionality, not linked. It also lists "Other data types" (device and app info). Name, email and photos are only sent if you identify users or users attach them to bug reports.',
+  },
   // ---------------------------------- Device access (declare only if sent off the device)
   {
     packages: ['expo-location', '@react-native-community/geolocation', 'react-native-geolocation-service', 'react-native-background-geolocation'],

@@ -5,6 +5,7 @@ import { manifestApis, manifestCollected, readManifest } from './manifest.js';
 import { findRule } from './rules.js';
 import type { ApiCategory, ApiEvidence, PackageReport, ScanResult } from './types.js';
 import { validateManifest } from './validate.js';
+import { libraryManifestPath, readAndroidManifest, readAppAndroid } from './android.js';
 
 const SKIP_DIRS = new Set([
   'node_modules', 'android', 'example', 'examples', 'Example', 'Examples', 'sample', 'samples',
@@ -53,8 +54,10 @@ function readLibraryManifest(report: PackageReport, file: string, rel: string) {
   for (const p of validateManifest(m, { sdk: true })) report.manifestIssues.push({ file: rel, ...p });
   if (m.NSPrivacyTracking === true) report.declaresTracking = true;
   if (Array.isArray(m.NSPrivacyTrackingDomains)) {
-    for (const d of m.NSPrivacyTrackingDomains) {
-      if (typeof d === 'string' && d && !report.trackingDomains.includes(d)) report.trackingDomains.push(d);
+    for (const raw of m.NSPrivacyTrackingDomains) {
+      // Some SDKs list URLs (https://consent.adjust.com); Apple expects the domain name only.
+      const d = typeof raw === 'string' ? raw.trim().replace(/^[a-z][a-z0-9+.-]*:\/\//i, '').split(/[/?#]/)[0].toLowerCase() : '';
+      if (d && !report.trackingDomains.includes(d)) report.trackingDomains.push(d);
     }
   }
 }
@@ -146,6 +149,7 @@ export function scanPackage(name: string, pkgDir: string): PackageReport {
     declaresTracking: false,
     trackingDomains: [],
     issuesUrl: issuesUrl(pkg),
+    androidPermissions: readAndroidManifest(libraryManifestPath(pkgDir))?.uses ?? [],
   };
   if (!report.hasIosNative) return report;
 
@@ -200,6 +204,7 @@ export function scanProject(projectDir: string): ScanResult {
     projectType: detectProjectType(projectDir, pkg),
     packages: [],
     missingPackages: [],
+    android: readAppAndroid(projectDir),
   };
 
   const seen = new Set<string>();
@@ -219,8 +224,8 @@ export function scanProject(projectDir: string): ScanResult {
       continue;
     }
     const report = scanPackage(name, dir);
-    // Transitive packages only matter if they contain iOS native code or a known rule.
-    if (direct || report.hasIosNative || report.rule) result.packages.push(report);
+    // Transitive packages only matter if they contain native code that needs declaring or a known rule.
+    if (direct || report.hasIosNative || report.rule || report.androidPermissions.length) result.packages.push(report);
     // Only follow dependencies of native packages (and the expo meta-package):
     // pure-JS trees are huge and never ship iOS code that needs declaring.
     if (report.hasIosNative || name === 'expo') {
@@ -264,6 +269,7 @@ export function scanPods(projectDir: string): PackageReport[] {
       manifestIssues: [],
       declaresTracking: false,
       trackingDomains: [],
+      androidPermissions: [],
     };
     for (const file of manifests) readLibraryManifest(report, file, path.relative(podsDir, file));
     reports.push(report);
