@@ -712,6 +712,48 @@ test('audit --suggest: valid fixed manifests and issue texts, nothing guessed', 
   assert.ok(fs.existsSync(path.join(dir, 'fixes/fs-lib/ISSUE.md')));
 });
 
+test('android: Play answers come from vendors\' Play disclosures, else from iOS (marked)', () => {
+  const dir = fixture('play-android');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'react-native-google-mobile-ads': '14.0.0', '@sentry/react-native': '6.0.0', '@braze/react-native-sdk': '24.0.0', 'react-native-onesignal': '5.0.0' } },
+    'node_modules/react-native-google-mobile-ads/package.json': { name: 'react-native-google-mobile-ads', version: '14.0.0' },
+    'node_modules/@sentry/react-native/package.json': { name: '@sentry/react-native', version: '6.0.0' },
+    'node_modules/@braze/react-native-sdk/package.json': { name: '@braze/react-native-sdk', version: '24.0.0' },
+    'node_modules/react-native-onesignal/package.json': { name: 'react-native-onesignal', version: '5.0.0' },
+  });
+  const a = analyze(scanProject(dir));
+  const byType = Object.fromEntries(a.play.map((f) => [f.type, f]));
+  // AdMob's Play page: shared, with fraud prevention (a purpose Apple does not have).
+  assert.equal(byType['coarse-location'].shared, true);
+  assert.ok(byType['coarse-location'].purposes.includes('fraud-prevention'));
+  // OneSignal's Play page adds Developer communications; its device ID is iOS-only.
+  assert.ok(byType['product-interaction'].purposes.includes('developer-communications'));
+  // Sentry publishes no Play page: derived from iOS and marked.
+  assert.ok(byType['crash-data'].derived.includes('@sentry/react-native'));
+  assert.ok(!byType['device-id'].derived.includes('react-native-google-mobile-ads'));
+  // Sharing purposes only come from the SDKs that share.
+  assert.deepEqual(byType['device-id'].sharedPurposes.sort(), ['advertising', 'analytics', 'fraud-prevention']);
+
+  const md = formatMarkdown(scanProject(dir), a);
+  assert.match(md, /\| Shared \|/);
+  assert.match(md, /@sentry\/react-native†/);
+  assert.match(md, /comes from its iOS disclosure/);
+
+  // Braze states no purposes: play leaves them to the developer.
+  const csv = [PLAY_HEADER, ...playRows('PSL_CRASH_LOGS')].join('\n') + '\n';
+  const res = fillPlayCsv(csv, [{ type: 'crash-data', purposes: [] }]);
+  assert.deepEqual(res.purposeTodo, ['Crash logs']);
+  const shared = fillPlayCsv([PLAY_HEADER, ...playRows('PSL_CRASH_LOGS'),
+    'PSL_DATA_USAGE_RESPONSES:PSL_CRASH_LOGS:DATA_USAGE_SHARING_PURPOSE,PSL_ANALYTICS,,MULTIPLE_CHOICE,Shared analytics',
+    'PSL_DATA_USAGE_RESPONSES:PSL_CRASH_LOGS:DATA_USAGE_SHARING_PURPOSE,PSL_APP_FUNCTIONALITY,,MULTIPLE_CHOICE,Shared functionality'].join('\n') + '\n',
+    [{ type: 'crash-data', purposes: ['analytics', 'app-functionality'], shared: true, sharedPurposes: ['analytics'] }]);
+  const rows = parseCsv(shared.content);
+  const v = (q, r) => rows.find((x) => x[0] === q && x[1] === r)?.[2];
+  assert.equal(v('PSL_DATA_USAGE_RESPONSES:PSL_CRASH_LOGS:PSL_DATA_USAGE_COLLECTION_AND_SHARING', 'PSL_DATA_USAGE_ONLY_SHARED'), 'true');
+  assert.equal(v('PSL_DATA_USAGE_RESPONSES:PSL_CRASH_LOGS:DATA_USAGE_SHARING_PURPOSE', 'PSL_ANALYTICS'), 'true');
+  assert.equal(v('PSL_DATA_USAGE_RESPONSES:PSL_CRASH_LOGS:DATA_USAGE_SHARING_PURPOSE', 'PSL_APP_FUNCTIONALITY'), '', 'only the sharing SDK\'s purposes');
+});
+
 test('issuesUrl understands the usual package.json forms', () => {
   assert.equal(issuesUrl({ bugs: 'https://x.dev/bugs' }), 'https://x.dev/bugs');
   assert.equal(issuesUrl({ bugs: { url: 'https://x.dev/b' } }), 'https://x.dev/b');

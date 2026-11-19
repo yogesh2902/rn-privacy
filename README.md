@@ -148,6 +148,16 @@ Update your manifest and store answers, then run `rn-privacy snapshot` again and
 privacy impact in the snapshot's diff. `rn-privacy diff --base origin/main` compares with the snapshot on another
 branch. The GitHub Action shows the diff in the job summary and warns when the snapshot is out of date.
 
+### Google Play: Android SDKs collect different data
+
+SDKs can collect different data on Android than on iOS. For example, ad and attribution SDKs read the Android
+Advertising ID, and some vendors say their data is **shared** rather than only collected. Where the vendor
+publishes a Google Play Data safety disclosure (Firebase, AdMob, AppsFlyer, Adjust, Branch, OneSignal, RevenueCat,
+Braze, CleverTap, MoEngage), the Play answers in `report` and `play` come from it, with Play's own purposes such as
+Fraud prevention and Developer communications, and data the vendor calls shared is marked as shared. For the
+others, the answer comes from the iOS disclosure and the report marks it with †. When a vendor does not say why it
+collects something, rn-privacy leaves the purpose for you to choose instead of guessing.
+
 ### Android permissions
 
 `scan` and `report` list the sensitive Android permissions in your app and where each comes from: a library's
@@ -359,7 +369,8 @@ into your app's manifest.
 
 The rules database is the most valuable part of this project. To add or fix a library, edit
 [`src/rules.ts`](src/rules.ts), link the vendor's official disclosure page or its published `PrivacyInfo.xcprivacy` in `sources`, and run
-`npm test`. Only add what the source says.
+`npm test`. Only add what the source says. If the vendor publishes a Google Play Data safety disclosure for its
+Android SDK, add it under `android` with Play's purposes and `shared` where the vendor says so.
 
 Required reason APIs are never taken from rules: they come from scanning the installed code, so they always
 match the version you have. Rules only describe **data collection**. If that changed between versions of a

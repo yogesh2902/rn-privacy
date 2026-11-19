@@ -1,5 +1,5 @@
-import { DATA_TYPES, PURPOSES } from './types.js';
-import type { CollectedData, DataType, Purpose } from './types.js';
+import { DATA_TYPES, PLAY_PURPOSES } from './types.js';
+import type { DataType, PlayCollected, PlayPurpose } from './types.js';
 
 /**
  * Google Play Data safety CSV.
@@ -31,18 +31,10 @@ export const PLAY_DATA_IDS: Record<DataType, { question: string; response: strin
   'device-id': { question: 'PSL_DATA_TYPES_IDENTIFIERS', response: 'PSL_DEVICE_ID' },
 };
 
-export const PLAY_PURPOSE_IDS: Record<Purpose, string> = {
-  'app-functionality': 'PSL_APP_FUNCTIONALITY',
-  analytics: 'PSL_ANALYTICS',
-  'third-party-advertising': 'PSL_ADVERTISING',
-  'developer-advertising': 'PSL_ADVERTISING',
-  'product-personalization': 'PSL_PERSONALIZATION',
-  other: 'PSL_APP_FUNCTIONALITY',
-};
-
-const PLAY_PURPOSE_LABELS: Record<string, string> = Object.fromEntries(
-  (Object.keys(PLAY_PURPOSE_IDS) as Purpose[]).map((p) => [PLAY_PURPOSE_IDS[p], PURPOSES[p].play]),
-);
+/** Play's purpose response IDs (used for both "collected" and "shared" purposes). */
+export const PLAY_PURPOSE_IDS: Record<PlayPurpose, string> = Object.fromEntries(
+  (Object.keys(PLAY_PURPOSES) as PlayPurpose[]).map((p) => [p, PLAY_PURPOSES[p].id]),
+) as Record<PlayPurpose, string>;
 
 const HEADER = 'Question ID (machine readable)';
 
@@ -87,6 +79,8 @@ export interface PlayFillResult {
   missingRows: string[];
   /** Data types whose "required or optional?" question only the developer can answer. */
   todo: string[];
+  /** Data types whose purposes the SDK vendor does not state. */
+  purposeTodo: string[];
 }
 
 export function isPlayCsv(text: string): boolean {
@@ -94,7 +88,7 @@ export function isPlayCsv(text: string): boolean {
 }
 
 /** Turn on the answers for the collected data. Never turns an answer off. */
-export function fillPlayCsv(text: string, collected: CollectedData[]): PlayFillResult {
+export function fillPlayCsv(text: string, collected: PlayCollected[]): PlayFillResult {
   if (!isPlayCsv(text)) {
     throw new Error('This is not a Data safety CSV exported from Play Console (the first column should be "Question ID (machine readable)").');
   }
@@ -123,12 +117,16 @@ export function fillPlayCsv(text: string, collected: CollectedData[]): PlayFillR
   };
 
   // Several of our types share one Play type (advertising data and other usage are both "Other actions").
-  const byPlayType = new Map<string, { label: string; purposes: Set<Purpose> }>();
+  const byPlayType = new Map<string, { label: string; purposes: Set<PlayPurpose>; shared: boolean; sharedPurposes: Set<PlayPurpose> }>();
   for (const item of collected) {
     const ids = PLAY_DATA_IDS[item.type];
     let entry = byPlayType.get(ids.response);
-    if (!entry) byPlayType.set(ids.response, (entry = { label: DATA_TYPES[item.type].play.type, purposes: new Set() }));
+    if (!entry) byPlayType.set(ids.response, (entry = { label: DATA_TYPES[item.type].play.type, purposes: new Set(), shared: false, sharedPurposes: new Set() }));
     for (const p of item.purposes) entry.purposes.add(p);
+    if (item.shared) {
+      entry.shared = true;
+      for (const p of item.sharedPurposes ?? item.purposes) entry.sharedPurposes.add(p);
+    }
   }
 
   if (byPlayType.size && set('PSL_DATA_COLLECTION_COLLECTS_PERSONAL_DATA', '', 'true', 'Collects or shares user data')) {
@@ -136,7 +134,8 @@ export function fillPlayCsv(text: string, collected: CollectedData[]): PlayFillR
   }
 
   const todo: string[] = [];
-  for (const [response, { label, purposes }] of byPlayType) {
+  const purposeTodo: string[] = [];
+  for (const [response, { label, purposes, shared, sharedPurposes }] of byPlayType) {
     const question = Object.values(PLAY_DATA_IDS).find((x) => x.response === response)!.question;
     const done: string[] = [];
     if (set(question, response, 'true', label)) done.push('selected');
@@ -146,13 +145,18 @@ export function fillPlayCsv(text: string, collected: CollectedData[]): PlayFillR
     // The SDKs in the rules send data to their servers and keep it, so it is not processed ephemerally.
     if (set(`${usage}:PSL_DATA_USAGE_EPHEMERAL`, '', 'false', `${label}: ephemeral`)) done.push('not ephemeral');
 
-    const purposeIds = [...new Set([...purposes].map((p) => PLAY_PURPOSE_IDS[p]))];
     const purposeLabels: string[] = [];
-    for (const id of purposeIds) {
-      const name = PLAY_PURPOSE_LABELS[id] ?? id;
-      if (set(`${usage}:DATA_USAGE_COLLECTION_PURPOSE`, id, 'true', `${label}: purpose ${name}`)) purposeLabels.push(name);
+    for (const p of purposes) {
+      const name = PLAY_PURPOSES[p].label;
+      if (set(`${usage}:DATA_USAGE_COLLECTION_PURPOSE`, PLAY_PURPOSE_IDS[p], 'true', `${label}: purpose ${name}`)) purposeLabels.push(name);
     }
     if (purposeLabels.length) done.push(`purposes: ${purposeLabels.join(', ')}`);
+    if (!purposes.size) purposeTodo.push(label);
+    // An SDK that says the data is shared (for example an ad network) shares it for the same purposes.
+    if (shared) {
+      if (set(`${usage}:PSL_DATA_USAGE_COLLECTION_AND_SHARING`, 'PSL_DATA_USAGE_ONLY_SHARED', 'true', `${label}: shared`)) done.push('shared');
+      for (const p of sharedPurposes) set(`${usage}:DATA_USAGE_SHARING_PURPOSE`, PLAY_PURPOSE_IDS[p], 'true', `${label}: sharing purpose ${PLAY_PURPOSES[p].label}`);
+    }
     if (done.length) changes.push(`${label}: ${done.join(', ')}`);
 
     const control = ['PSL_DATA_USAGE_USER_CONTROL_OPTIONAL', 'PSL_DATA_USAGE_USER_CONTROL_REQUIRED']
@@ -160,5 +164,5 @@ export function fillPlayCsv(text: string, collected: CollectedData[]): PlayFillR
     if (control.every((r) => r && !isOn(r))) todo.push(label);
   }
 
-  return { content: toCsv(rows, eol, trailingNewline), changes, missingRows, todo };
+  return { content: toCsv(rows, eol, trailingNewline), changes, missingRows, todo, purposeTodo };
 }

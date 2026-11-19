@@ -1,5 +1,6 @@
 import { API_CATEGORIES, DEFAULT_REASONS } from './apis.js';
-import type { ApiCategory, ApiUsage, CollectedData, DataType, Purpose, ScanResult } from './types.js';
+import type { ApiCategory, ApiUsage, CollectedData, DataType, PackageReport, PlayCollected, PlayPurpose, Purpose, ScanResult } from './types.js';
+import { APPLE_TO_PLAY_PURPOSE } from './types.js';
 import { SDK_ONLY_REASONS } from './validate.js';
 import { SENSITIVE_PERMISSIONS } from './android.js';
 
@@ -37,6 +38,74 @@ export interface Analysis {
   tracking: { pkg: string; declaresTracking: boolean; domains: string[] }[];
   /** Sensitive Android permissions and who adds them. Permissions the app removes are left out. */
   android: AndroidFinding[];
+  /** Data collected, in Google Play's terms (from vendors' Play disclosures where they exist). */
+  play: PlayFinding[];
+}
+
+export interface PlayFinding {
+  type: DataType;
+  purposes: PlayPurpose[];
+  /** At least one SDK says this data is shared. */
+  shared: boolean;
+  /** Purposes of the SDKs that share it. */
+  sharedPurposes: PlayPurpose[];
+  /** Packages that always collect it. */
+  packages: string[];
+  /** Packages that collect it only in some setups. */
+  conditional: { pkg: string; condition: string; item: PlayCollected }[];
+  /** Packages whose vendor publishes no Play disclosure: their answer comes from the iOS disclosure. */
+  derived: string[];
+}
+
+/** What a package collects on Android, and whether that comes from a Play disclosure. */
+function playItems(pkg: PackageReport): { items: PlayCollected[]; derived: boolean } {
+  if (pkg.rule?.android) return { items: pkg.rule.android.collects, derived: false };
+  const ios = pkg.rule ? pkg.rule.collects ?? [] : pkg.manifestCollected;
+  return {
+    items: ios.map((c) => ({ type: c.type, purposes: [...new Set(c.purposes.map((p) => APPLE_TO_PLAY_PURPOSE[p]))], conditional: c.conditional })),
+    derived: true,
+  };
+}
+
+function playFindings(scan: ScanResult): PlayFinding[] {
+  const map = new Map<DataType, PlayFinding>();
+  for (const pkg of scan.packages) {
+    const { items, derived } = playItems(pkg);
+    for (const item of items) {
+      let f = map.get(item.type);
+      if (!f) map.set(item.type, (f = { type: item.type, purposes: [], shared: false, sharedPurposes: [], packages: [], conditional: [], derived: [] }));
+      if (derived && !f.derived.includes(pkg.name)) f.derived.push(pkg.name);
+      if (item.conditional) {
+        f.conditional.push({ pkg: pkg.name, condition: item.conditional, item });
+        continue;
+      }
+      for (const p of item.purposes) if (!f.purposes.includes(p)) f.purposes.push(p);
+      if (item.shared) {
+        f.shared = true;
+        for (const p of item.purposes) if (!f.sharedPurposes.includes(p)) f.sharedPurposes.push(p);
+      }
+      if (!f.packages.includes(pkg.name)) f.packages.push(pkg.name);
+    }
+  }
+  return [...map.values()];
+}
+
+/** Play answers for `play` and the report: always-collected data, plus conditional data when asked. */
+export function toPlayCollected(a: Analysis, includeConditional: boolean): PlayCollected[] {
+  const out: PlayCollected[] = [];
+  for (const f of a.play) {
+    const items: PlayCollected[] = [];
+    if (f.packages.length) items.push({ type: f.type, purposes: f.purposes, shared: f.shared, sharedPurposes: f.sharedPurposes });
+    if (includeConditional) items.push(...f.conditional.map((c) => ({ ...c.item, sharedPurposes: c.item.shared ? c.item.purposes : [] })));
+    if (!items.length) continue;
+    out.push({
+      type: f.type,
+      purposes: [...new Set(items.flatMap((i) => i.purposes))],
+      shared: items.some((i) => i.shared),
+      sharedPurposes: [...new Set(items.flatMap((i) => i.sharedPurposes ?? []))],
+    });
+  }
+  return out;
 }
 
 export interface AndroidFinding {
@@ -124,8 +193,9 @@ export function analyze(scan: ScanResult): Analysis {
       tracking.push({ pkg: pkg.name, declaresTracking: pkg.declaresTracking, domains: pkg.trackingDomains });
     }
 
-    if (pkg.rule && (pkg.rule.sources.length || pkg.rule.notes)) {
-      sources.push({ pkg: pkg.name, version: pkg.version, versions: pkg.rule.versions, urls: pkg.rule.sources, notes: pkg.rule.notes });
+    if (pkg.rule && (pkg.rule.sources.length || pkg.rule.notes || pkg.rule.android)) {
+      const notes = [pkg.rule.notes, pkg.rule.android?.notes && `Android: ${pkg.rule.android.notes}`].filter(Boolean).join(' ');
+      sources.push({ pkg: pkg.name, version: pkg.version, versions: pkg.rule.versions, urls: [...pkg.rule.sources, ...(pkg.rule.android?.sources ?? [])], notes: notes || undefined });
     }
 
     if (pkg.unscannedBinaries.length && !pkg.shipsManifest.length) {
@@ -168,6 +238,7 @@ export function analyze(scan: ScanResult): Analysis {
     warnings,
     tracking,
     android: androidFindings(scan),
+    play: playFindings(scan),
     sources,
   };
 }

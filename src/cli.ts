@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { analyze, toApiUsages, toCollected, trackingDomains } from './analyze.js';
+import { analyze, toApiUsages, toCollected, toPlayCollected, trackingDomains } from './analyze.js';
 import { audit, auditProblemCount } from './audit.js';
 import { expoSnippet, expoWriteTarget, findExpoConfig, findIosManifest, planExpoAppJson, planIosManifest } from './ios.js';
 import { readManifest } from './manifest.js';
@@ -170,7 +170,7 @@ function main(argv: string[]): number {
         console.error(c.red(`File not found: ${csvPath}`));
         return 1;
       }
-      const collected = toCollected(analysis, !!values['include-conditional']);
+      const collected = toPlayCollected(analysis, !!values['include-conditional']);
       const result = fillPlayCsv(fs.readFileSync(input, 'utf8'), collected);
 
       print(c.bold('Google Play Data safety'));
@@ -182,8 +182,11 @@ function main(argv: string[]): number {
         for (const m of result.missingRows) print(c.yellow(`  ! ${m}`));
       }
       print(c.bold('\nStill to answer in Play Console'));
+      if (result.purposeTodo.length) print(`  - Why is it collected? The SDK vendor does not say for: ${result.purposeTodo.join(', ')}`);
       if (result.todo.length) print(`  - Required or optional for users? (${result.todo.join(', ')})`);
-      if (analysis.data.some((d) => d.tracking || d.purposes.includes('third-party-advertising'))) {
+      const sharing = analysis.play.filter((d) => d.shared).flatMap((d) => d.packages);
+      if (sharing.length) print(`  - Shared: marked where the SDK's vendor says so (${[...new Set(sharing)].join(', ')}). Check the others in \`rn-privacy report\`.`);
+      else if (analysis.data.some((d) => d.tracking || d.purposes.includes('third-party-advertising'))) {
         print('  - Shared? Ad and attribution SDKs may use data for their own purposes, which counts as sharing. Check the vendor pages in `rn-privacy report`.');
       }
       const adId = analysis.android.find((p) => p.permission === AD_ID);

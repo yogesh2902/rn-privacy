@@ -20,6 +20,12 @@
   `comment-id`.
 - **pnpm and monorepos:** verified with real pnpm installs (including transitive Expo modules) and npm workspaces
   with hoisted dependencies. Yarn Plug'n'Play gets one clear message (React Native needs `nodeLinker: node-modules`).
+- **Android data collection for SDKs:** rules can describe the Android SDK from the vendor's Google Play Data
+  safety disclosure, with Play's purposes (including Fraud prevention and Developer communications) and whether
+  the data is shared. Added for Firebase (Analytics, Crashlytics, Messaging, Performance, Auth), AdMob, AppsFlyer,
+  Adjust, Branch, OneSignal, RevenueCat, Braze, CleverTap and MoEngage. `report` gets a Shared column and marks
+  answers derived from iOS with †; `play` ticks "shared" and the sharing purposes, and leaves purposes the vendor
+  does not state for you to choose.
 - **Releases publish from GitHub** with npm trusted publishing, so packages carry a provenance statement
   (see RELEASING.md).
 - SDK tracking domains are normalized to domain names (Adjust lists URLs). The CLI reads its version from

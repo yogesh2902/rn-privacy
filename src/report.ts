@@ -1,5 +1,5 @@
 import { API_LABELS, DEFAULT_REASONS } from './apis.js';
-import { DATA_TYPES, PURPOSES } from './types.js';
+import { DATA_TYPES, PLAY_PURPOSES, PURPOSES } from './types.js';
 import type { Analysis, DataFinding } from './analyze.js';
 import { trackingDomains } from './analyze.js';
 import { audit as runAudit, auditProblemCount, categoryList } from './audit.js';
@@ -195,14 +195,25 @@ export function formatMarkdown(scan: ScanResult, a: Analysis): string {
   out.push('## Google Play Console: Data safety', '');
   out.push('Tip: export the Data safety form to CSV in Play Console and run `npx rn-privacy play data_safety.csv -o filled.csv` to fill these answers in, then import the file.', '');
   out.push('Answer **Yes** to "Does your app collect or share any of the required user data types?" if this table is not empty.', '');
-  out.push('| Category | Data type | Purposes | Collected by |', '| --- | --- | --- | --- |');
-  const playRows = a.data
-    .map((d) => ({ d, info: DATA_TYPES[d.type].play }))
-    .sort((x, y) => x.info.category.localeCompare(y.info.category) || x.info.type.localeCompare(y.info.type));
-  for (const { d, info } of playRows) {
-    out.push(`| ${info.category} | ${info.type} | ${purposeLabels([...d.purposes, ...d.conditional.flatMap((x) => x.item.purposes)], 'play')} | ${allPackages(d).join(', ')} |`);
+  out.push('| Category | Data type | Purposes | Shared | Collected by |', '| --- | --- | --- | --- | --- |');
+  // Several data types can be the same Play type (advertising data and other usage are both "Other actions").
+  const merged = new Map<string, { category: string; type: string; purposes: Set<string>; shared: boolean; by: Set<string> }>();
+  for (const d of a.play) {
+    const info = DATA_TYPES[d.type].play;
+    const key = `${info.category}\u0000${info.type}`;
+    let row = merged.get(key);
+    if (!row) merged.set(key, (row = { category: info.category, type: info.type, purposes: new Set(), shared: false, by: new Set() }));
+    for (const p of [...d.purposes, ...d.conditional.flatMap((x) => x.item.purposes)]) row.purposes.add(PLAY_PURPOSES[p].label);
+    row.shared ||= d.shared || d.conditional.some((x) => x.item.shared);
+    for (const pkg of [...d.packages, ...d.conditional.map((x) => `${x.pkg}*`)]) row.by.add(d.derived.includes(pkg.replace(/\*$/, '')) ? `${pkg}†` : pkg);
+  }
+  const anyDerived = a.play.some((d) => d.derived.length);
+  for (const row of [...merged.values()].sort((x, y) => x.category.localeCompare(y.category) || x.type.localeCompare(y.type))) {
+    out.push(`| ${row.category} | ${row.type} | ${[...row.purposes].join(', ') || '_Not stated by the vendor: choose_'} | ${row.shared ? 'Yes' : 'No'} | ${[...row.by].join(', ')} |`);
   }
   out.push('');
+  if (a.play.some((d) => d.conditional.length)) out.push('\\* Only in some setups: see the vendor notes below.', '');
+  if (anyDerived) out.push('† The vendor publishes no Google Play disclosure for its Android SDK: this answer comes from its iOS disclosure. Check it.', '');
   out.push(
     'For each data type, Play also asks:',
     '- **Shared?** Data sent to a service provider that processes it for you usually does not count as sharing. Ad and attribution SDKs often do share. Check each vendor link below.',
@@ -304,5 +315,6 @@ export function toJson(scan: ScanResult, a: Analysis) {
     trackingDomains: trackingDomains(a),
     android: a.android,
     androidMergedManifest: scan.android.mergedFile,
+    play: a.play,
   };
 }

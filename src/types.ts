@@ -66,6 +66,48 @@ export const PURPOSES: Record<Purpose, { label: string; apple: string; play: str
   other: { label: 'Other purposes', apple: 'NSPrivacyCollectedDataTypePurposeOther', play: 'App functionality' },
 };
 
+/** Google Play Data safety purposes (Play has some Apple does not, and the reverse). */
+export type PlayPurpose =
+  | 'app-functionality'
+  | 'analytics'
+  | 'developer-communications'
+  | 'advertising'
+  | 'fraud-prevention'
+  | 'personalization'
+  | 'account-management';
+
+export const PLAY_PURPOSES: Record<PlayPurpose, { label: string; id: string }> = {
+  'app-functionality': { label: 'App functionality', id: 'PSL_APP_FUNCTIONALITY' },
+  analytics: { label: 'Analytics', id: 'PSL_ANALYTICS' },
+  'developer-communications': { label: 'Developer communications', id: 'PSL_DEVELOPER_COMMUNICATIONS' },
+  advertising: { label: 'Advertising or marketing', id: 'PSL_ADVERTISING' },
+  'fraud-prevention': { label: 'Fraud prevention, security, and compliance', id: 'PSL_FRAUD_PREVENTION_SECURITY' },
+  personalization: { label: 'Personalization', id: 'PSL_PERSONALIZATION' },
+  'account-management': { label: 'Account management', id: 'PSL_ACCOUNT_MANAGEMENT' },
+};
+
+/** Apple purposes as Play purposes, for SDKs whose vendor publishes no Play disclosure. */
+export const APPLE_TO_PLAY_PURPOSE: Record<Purpose, PlayPurpose> = {
+  'app-functionality': 'app-functionality',
+  analytics: 'analytics',
+  'third-party-advertising': 'advertising',
+  'developer-advertising': 'advertising',
+  'product-personalization': 'personalization',
+  other: 'app-functionality',
+};
+
+/** What an SDK's Android version collects, in Google Play's terms. */
+export interface PlayCollected {
+  type: DataType;
+  purposes: PlayPurpose[];
+  /** The vendor says the data is shared (transferred to a third party), not only collected. */
+  shared?: boolean;
+  /** When several SDKs are combined: the purposes of those that share it. */
+  sharedPurposes?: PlayPurpose[];
+  /** Only collected in some setups. */
+  conditional?: string;
+}
+
 export interface CollectedData {
   type: DataType;
   purposes: Purpose[];
@@ -94,6 +136,11 @@ export interface LibraryRule {
    */
   versions?: string;
   collects?: CollectedData[];
+  /**
+   * The Android SDK, from the vendor's Google Play Data safety disclosure. Without it, the Play
+   * answers are derived from `collects` (the iOS disclosure) and marked as such.
+   */
+  android?: { collects: PlayCollected[]; sources: string[]; notes?: string };
   accesses?: DeviceAccess[];
   /** Vendor pages the rule is based on. Always check these before submitting. */
   sources: string[];
