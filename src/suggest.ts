@@ -103,7 +103,9 @@ function suggestFor(pkg: PackageReport, found: { problems: string[] }): Suggesti
       if (fromRule.length) {
         purposes = fromRule;
         const names = fromRule.map((p) => p.replace('NSPrivacyCollectedDataTypePurpose', '')).join(', ');
-        changes.push(`${type}: added purposes ${names}, taken from rn-privacy's rule for ${pkg.rule!.name} (based on its documentation).`);
+        changes.push(pkg.rule!.origin
+          ? `${type}: added purposes ${names}, taken from the app's own rule for ${pkg.rule!.name}.`
+          : `${type}: added purposes ${names}, taken from rn-privacy's rule for ${pkg.rule!.name} (based on its documentation).`);
         decide.push(`${type}: confirm the purposes ${names} match how the SDK uses it.`);
       } else {
         decide.push(`${type} has no valid purpose. Add the real one(s), for example NSPrivacyCollectedDataTypePurposeAnalytics.`);

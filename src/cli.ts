@@ -50,6 +50,7 @@ ${c.bold('Options')}
 ${c.bold('Also')}
   Expo plugin    Add "plugins": ["rn-privacy"] to app.json to update the manifest on every prebuild
   GitHub Action  uses: yogesh2902/rn-privacy@v0.4.0 checks every pull request
+  Your rules     rn-privacy.config.json describes in-house SDKs and data your app collects
   Docs           https://github.com/yogesh2902/rn-privacy
 `;
 

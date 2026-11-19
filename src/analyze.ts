@@ -33,7 +33,7 @@ export interface Analysis {
   data: DataFinding[];
   access: { type: DataType; packages: string[] }[];
   warnings: Warning[];
-  sources: { pkg: string; version: string; versions?: string; urls: string[]; notes?: string }[];
+  sources: { pkg: string; version: string; versions?: string; urls: string[]; notes?: string; /** Config file, for the project's own rules. */ origin?: string }[];
   /** Libraries whose own manifest declares tracking or tracking domains. */
   tracking: { pkg: string; declaresTracking: boolean; domains: string[] }[];
   /** Sensitive Android permissions and who adds them. Permissions the app removes are left out. */
@@ -60,6 +60,8 @@ export interface PlayFinding {
 /** What a package collects on Android, and whether that comes from a Play disclosure. */
 function playItems(pkg: PackageReport): { items: PlayCollected[]; derived: boolean } {
   if (pkg.rule?.android) return { items: pkg.rule.android.collects, derived: false };
+  // Pods and Swift packages are not in the Android app.
+  if (pkg.iosOnly) return { items: [], derived: false };
   const ios = pkg.rule ? pkg.rule.collects ?? [] : pkg.manifestCollected;
   return {
     items: ios.map((c) => ({ type: c.type, purposes: [...new Set(c.purposes.map((p) => APPLE_TO_PLAY_PURPOSE[p]))], conditional: c.conditional })),
@@ -193,9 +195,9 @@ export function analyze(scan: ScanResult): Analysis {
       tracking.push({ pkg: pkg.name, declaresTracking: pkg.declaresTracking, domains: pkg.trackingDomains });
     }
 
-    if (pkg.rule && (pkg.rule.sources.length || pkg.rule.notes || pkg.rule.android)) {
+    if (pkg.rule && (pkg.rule.sources.length || pkg.rule.notes || pkg.rule.android || pkg.rule.origin)) {
       const notes = [pkg.rule.notes, pkg.rule.android?.notes && `Android: ${pkg.rule.android.notes}`].filter(Boolean).join(' ');
-      sources.push({ pkg: pkg.name, version: pkg.version, versions: pkg.rule.versions, urls: [...pkg.rule.sources, ...(pkg.rule.android?.sources ?? [])], notes: notes || undefined });
+      sources.push({ pkg: pkg.name, version: pkg.version, versions: pkg.rule.versions, urls: [...pkg.rule.sources, ...(pkg.rule.android?.sources ?? [])], notes: notes || undefined, origin: pkg.rule.origin });
     }
 
     if (pkg.unscannedBinaries.length && !pkg.shipsManifest.length) {
@@ -222,6 +224,15 @@ export function analyze(scan: ScanResult): Analysis {
       message:
         'Some libraries collect data used for tracking. On iOS you must ask for App Tracking Transparency permission, set NSPrivacyTracking to true and list the tracking domains in NSPrivacyTrackingDomains. rn-privacy never turns this on for you.',
     });
+  }
+  if (scan.swiftPackagesNotDownloaded.length) {
+    const names = scan.swiftPackagesNotDownloaded;
+    warnings.push({
+      message: `${names.length} Swift package${names.length === 1 ? ' is' : 's are'} listed in Package.resolved but not downloaded, so ${names.length === 1 ? 'it was' : 'they were'} not scanned (${names.slice(0, 5).join(', ')}${names.length > 5 ? ', ...' : ''}). Build the app in Xcode once, or run \`xcodebuild -resolvePackageDependencies -workspace ios/<App>.xcworkspace -scheme <App> -clonedSourcePackagesDirPath ios/SourcePackages\`, then scan again.`,
+    });
+  }
+  for (const name of scan.unusedRules) {
+    warnings.push({ pkg: name, message: `Your rule in rn-privacy.config.json matches no installed package. Check the names in "packages".` });
   }
   if (scan.yarnPnp) {
     warnings.push({ message: 'This project uses Yarn Plug\'n\'Play, which React Native does not support, so there is no node_modules to scan. Add `nodeLinker: node-modules` to .yarnrc.yml, run `yarn install`, then scan again.' });

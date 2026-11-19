@@ -145,6 +145,8 @@ export interface LibraryRule {
   /** Vendor pages the rule is based on. Always check these before submitting. */
   sources: string[];
   notes?: string;
+  /** Set for rules from the project's config file (the file name), not rn-privacy's own database. */
+  origin?: string;
 }
 
 /** Apple "required reason" API categories. */
@@ -188,6 +190,8 @@ export interface PackageReport {
   androidPermissions: string[];
   /** Prebuilt binaries too large to scan for required reason APIs. */
   unscannedBinaries: string[];
+  /** Only in the iOS app (a CocoaPods pod or a Swift package), so not part of the Google Play answers. */
+  iosOnly?: boolean;
 }
 
 export interface ManifestIssue {
@@ -204,6 +208,12 @@ export interface ScanResult {
   missingPackages: string[];
   /** The project uses Yarn Plug'n'Play (no node_modules), which React Native does not support. */
   yarnPnp: boolean;
+  /** rn-privacy.config.json, if the project has one. */
+  configFile?: string;
+  /** Project rules whose packages are not installed (probably a typo). */
+  unusedRules: string[];
+  /** Swift packages in Package.resolved that Xcode has not downloaded yet, so they were not scanned. */
+  swiftPackagesNotDownloaded: string[];
   /** The app's own Android permissions (manifest, app.json, merged manifest of the last build). */
   android: import('./android.js').AppAndroid;
 }

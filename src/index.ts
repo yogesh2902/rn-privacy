@@ -18,3 +18,8 @@ export type { ManifestProblem } from './validate.js';
 export { fillPlayCsv, parseCsv, PLAY_DATA_IDS, PLAY_PURPOSE_IDS } from './play.js';
 export type { PlayFillResult } from './play.js';
 export * from './types.js';
+export { loadConfig, parseConfig, ConfigError, CONFIG_FILE } from './config.js';
+export type { ProjectConfig } from './config.js';
+export { findSwiftPackages, parsePackageResolved, pbxprojPackages } from './spm.js';
+export type { SwiftPackage, SwiftPackages } from './spm.js';
+export { scanSwiftPackages } from './scanner.js';

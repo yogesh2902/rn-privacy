@@ -737,7 +737,7 @@ test('android: Play answers come from vendors\' Play disclosures, else from iOS 
   const md = formatMarkdown(scanProject(dir), a);
   assert.match(md, /\| Shared \|/);
   assert.match(md, /@sentry\/react-native†/);
-  assert.match(md, /comes from its iOS disclosure/);
+  assert.match(md, /comes from the iOS data/);
 
   // Braze states no purposes: play leaves them to the developer.
   const csv = [PLAY_HEADER, ...playRows('PSL_CRASH_LOGS')].join('\n') + '\n';
@@ -775,4 +775,162 @@ test('public API works from ESM imports', () => {
 test('--help and unknown command', () => {
   assert.match(execFileSync(process.execPath, [CLI, '--help'], { encoding: 'utf8' }), /Commands/);
   assert.equal(run(os.tmpdir(), 'nope').status, 2);
+});
+
+test('config: your own rules for unknown SDKs, pods and the app itself, replacing built-in ones', () => {
+  const dir = fixture('config');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { '@acme/tracker': '1.0.0', '@sentry/react-native': '6.0.0' } },
+    'node_modules/@acme/tracker/package.json': { name: '@acme/tracker', version: '2.1.0' },
+    'node_modules/@sentry/react-native/package.json': { name: '@sentry/react-native', version: '6.0.0' },
+    'ios/Pods/AcmeKit/AcmeKit.m': '',
+    'rn-privacy.config.json': {
+      $schema: './node_modules/rn-privacy/config.schema.json',
+      rules: [
+        { packages: ['@acme/tracker'], name: 'Acme Tracker', collects: [{ type: 'device-id', purposes: ['analytics'], linked: false, tracking: false }],
+          android: { collects: [{ type: 'device-id', purposes: ['analytics'], shared: true }] }, sources: ['https://acme.example/privacy'] },
+        { packages: ['@sentry/react-native'], name: 'Sentry (our setup)', collects: [] },
+        { packages: ['AcmeKit'], name: 'AcmeKit', collects: [{ type: 'precise-location', purposes: ['app-functionality'], linked: true, tracking: false }] },
+        { name: 'Sign-in', collects: [{ type: 'email', purposes: ['app-functionality'], linked: true, tracking: false }],
+          android: { collects: [{ type: 'email', purposes: ['account-management'] }] } },
+        { packages: ['not-installed'], name: 'Typo', collects: [] },
+      ],
+    },
+  });
+  const scan = scanProject(dir);
+  const a = analyze(scan);
+  const types = a.data.map((d) => d.type).sort();
+  assert.deepEqual(types, ['device-id', 'email', 'precise-location'], 'Sentry\'s built-in rule is replaced');
+  assert.deepEqual(a.data.find((d) => d.type === 'precise-location').packages, ['AcmeKit (CocoaPods)']);
+  // A pod is not in the Android app; the app rule and the npm SDK are.
+  assert.deepEqual(a.play.map((p) => p.type).sort(), ['device-id', 'email']);
+  assert.equal(a.play.find((p) => p.type === 'device-id').shared, true);
+  assert.deepEqual(a.play.find((p) => p.type === 'email').purposes, ['account-management']);
+  assert.ok(a.warnings.some((w) => w.pkg === 'Typo' && /matches no installed package/.test(w.message)));
+  const md = formatMarkdown(scan, a);
+  assert.match(md, /\*\*Acme Tracker|@acme\/tracker@2\.1\.0\*\* \(your rule in rn-privacy\.config\.json\)/);
+  assert.match(md, /\*\*Sign-in\*\* \(your rule in rn-privacy\.config\.json\)/);
+  assert.match(run(dir, 'scan').stdout, /using your rules/);
+});
+
+test('config: every problem is reported with a fix, and the command fails', () => {
+  const dir = fixture('config-bad');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: {} },
+    'rn-privacy.config.json': {
+      rule: [],
+      rules: [
+        { name: 'A', collects: [{ type: 'emial', purposes: ['ads'], linked: true }] },
+        { packages: [], name: 'B', versions: '>=1 <<2', collect: [] },
+        { packages: ['c'], name: 'C', android: { collects: [{ type: 'email', purposes: ['analytic'] }] } },
+      ],
+    },
+  });
+  const r = run(dir, 'scan');
+  assert.equal(r.status, 1);
+  for (const msg of [
+    /Unknown setting "rule"/,
+    /"emial" is not a data type/,
+    /"ads" is not a purpose/,
+    /"tracking" must be true or false/,
+    /"packages" must be a non-empty list/,
+    /unknown field "collect"/,
+    /"analytic" is not a Google Play purpose/,
+  ]) assert.match(r.stderr, msg);
+  assert.throws(() => api.parseConfig({ rules: [{ name: 'x', collects: [], versions: '^1' }] }), /"versions" only works with "packages"/);
+  write(dir, { 'rn-privacy.config.json': '{ nope' });
+  assert.match(run(dir, 'scan').stderr, /Not valid JSON/);
+});
+
+test('config schema lists the same data types and purposes as the code', () => {
+  const schema = JSON.parse(fs.readFileSync(new URL('../config.schema.json', import.meta.url), 'utf8'));
+  const d = schema.$defs;
+  assert.deepEqual(d.dataType.enum.sort(), Object.keys(api.DATA_TYPES).sort());
+  assert.deepEqual(d.purpose.enum.sort(), Object.keys(api.PURPOSES).sort());
+  assert.deepEqual(d.playPurpose.enum.sort(), Object.keys(api.PLAY_PURPOSES).sort());
+});
+
+const resolvedV2 = (pins) => JSON.stringify({ pins: pins.map(([identity, location, version]) => ({ identity, kind: 'remoteSourceControl', location, state: { revision: 'abcdef1234567', version } })), version: 2 });
+
+test('swift packages: Package.resolved, checkouts, binary artifacts and DerivedData', () => {
+  const dir = fixture('spm');
+  const dd = fixture('spm-dd');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: {} },
+    'ios/App.xcworkspace/xcshareddata/swiftpm/Package.resolved': resolvedV2([
+      ['sdkkit', 'https://github.com/acme/SDKKit.git', '3.2.1'],
+      ['binarysdk', 'https://github.com/acme/BinarySDK', '1.0.0'],
+      ['plain', 'https://github.com/acme/plain.git', '0.1.0'],
+    ]),
+  });
+  const sp = path.join(dd, 'App-xyz', 'SourcePackages');
+  write(sp, {
+    'checkouts/SDKKit/Sources/SDKKit/PrivacyInfo.xcprivacy': libManifest(
+      '<key>NSPrivacyTracking</key><true/><key>NSPrivacyTrackingDomains</key><array><string>https://t.acme.example/x</string></array>',
+    ),
+    'checkouts/SDKKit/Sources/SDKKit/Store.swift': 'UserDefaults.standard.set(1, forKey: "k")',
+    'checkouts/SDKKit/Tests/SDKKitTests/T.swift': 'mach_absolute_time()',
+    'checkouts/BinarySDK/Package.swift': '// swift-tools-version:5.9',
+    'checkouts/plain/Sources/Plain/P.swift': 'let x = 1',
+  });
+  const bin = path.join(sp, 'artifacts/binarysdk/BinarySDK/BinarySDK.xcframework/ios-arm64/BinarySDK.framework/BinarySDK');
+  fs.mkdirSync(path.dirname(bin), { recursive: true });
+  fs.writeFileSync(bin, Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(60), Buffer.from('\0_mach_absolute_time\0')]));
+  write(dd, {
+    'App-xyz/info.plist': `<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>WorkspacePath</key><string>${path.join(dir, 'ios', 'App.xcworkspace')}</string></dict></plist>`,
+  });
+  const env = { ...process.env, RN_PRIVACY_DERIVED_DATA: dd };
+  const old = process.env.RN_PRIVACY_DERIVED_DATA;
+  process.env.RN_PRIVACY_DERIVED_DATA = dd;
+  try {
+    const scan = scanProject(dir);
+    const names = scan.packages.map((p) => `${p.name}@${p.version}`);
+    assert.deepEqual(names.sort(), ['BinarySDK (Swift Package)@1.0.0', 'SDKKit (Swift Package)@3.2.1'], 'a package with nothing to declare is left out');
+    const kit = scan.packages.find((p) => p.name.startsWith('SDKKit'));
+    assert.deepEqual([...kit.apis.keys()], ['NSPrivacyAccessedAPICategoryUserDefaults'], 'tests are not scanned');
+    assert.deepEqual(kit.trackingDomains, ['t.acme.example']);
+    assert.equal(kit.issuesUrl, 'https://github.com/acme/SDKKit/issues');
+    const binary = scan.packages.find((p) => p.name.startsWith('BinarySDK'));
+    assert.equal(binary.apis.get('NSPrivacyAccessedAPICategorySystemBootTime').evidence[0].kind, 'binary');
+    const a = analyze(scan);
+    assert.deepEqual(a.play, [], 'Swift packages are not in the Android app');
+    assert.ok(audit(scan).undeclared.some((r) => r.pkg === 'BinarySDK (Swift Package)'));
+    assert.deepEqual(scan.swiftPackagesNotDownloaded, []);
+  } finally {
+    if (old === undefined) delete process.env.RN_PRIVACY_DERIVED_DATA;
+    else process.env.RN_PRIVACY_DERIVED_DATA = old;
+  }
+
+  // Not downloaded yet: say so instead of reporting nothing.
+  const r = spawnSync(process.execPath, [CLI, 'scan'], { cwd: dir, encoding: 'utf8', env: { ...env, NO_COLOR: '1', RN_PRIVACY_DERIVED_DATA: path.join(dd, 'nothing') } });
+  assert.match(r.stdout, /3 Swift packages are listed in Package\.resolved but not downloaded/);
+
+  // A folder from -clonedSourcePackagesDirPath wins, and format 1 of Package.resolved works too.
+  fs.rmSync(path.join(dir, 'ios/App.xcworkspace'), { recursive: true });
+  write(dir, {
+    'ios/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved': JSON.stringify({
+      object: { pins: [{ package: 'SDKKit', repositoryURL: 'https://github.com/acme/SDKKit.git', state: { version: '3.0.0' } }] }, version: 1,
+    }),
+  });
+  fs.cpSync(path.join(sp, 'checkouts'), path.join(dir, 'ios/SourcePackages/checkouts'), { recursive: true });
+  const local = spawnSync(process.execPath, [CLI, 'scan', '--format', 'json'], { cwd: dir, encoding: 'utf8', env: { ...env, RN_PRIVACY_DERIVED_DATA: path.join(dd, 'nothing') } });
+  assert.deepEqual(JSON.parse(local.stdout).packages.map((p) => `${p.name}@${p.version}`), ['SDKKit (Swift Package)@3.0.0']);
+});
+
+test('swift packages: names from the Xcode project when Package.resolved is missing', () => {
+  const pins = api.pbxprojPackages(`
+    A1 /* XCRemoteSwiftPackageReference "Kit" */ = {
+      isa = XCRemoteSwiftPackageReference;
+      repositoryURL = "https://github.com/acme/Kit.git";
+    };`);
+  assert.deepEqual(pins, [{ identity: 'kit', name: 'Kit', location: 'https://github.com/acme/Kit.git', version: '?' }]);
+  assert.deepEqual(api.parsePackageResolved('not json'), []);
+});
+
+test('rules: Play disclosures for BugSnag, Clarity, Singular and Luciq', () => {
+  for (const pkg of ['@bugsnag/react-native', '@microsoft/react-native-clarity', 'singular-react-native', '@luciq/react-native']) {
+    const rule = findRule(pkg);
+    assert.ok(rule.android?.collects.length, pkg);
+    assert.ok(rule.android.sources.every((s) => s.startsWith('https://')), pkg);
+  }
 });

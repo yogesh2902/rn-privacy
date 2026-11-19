@@ -41,7 +41,8 @@
     "dist",
     "app.plugin.js",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "config.schema.json"
   ],
   "engines": {
     "node": ">=18.3"

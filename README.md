@@ -43,6 +43,9 @@ npx rn-privacy diff       # privacy changes since your committed privacy-snapsho
 - **Shows privacy changes in pull requests.** Commit `privacy-snapshot.json` and `diff` tells reviewers when a
   dependency change needs a new declaration.
 - **Reads `ios/Pods`** after `pod install`, so the native SDKs that CocoaPods downloads are covered too.
+- **Reads Swift packages** you add in Xcode (from `Package.resolved` and the copies Xcode downloads).
+- **Takes your own rules** for in-house or private SDKs and for data your app itself collects, in
+  `rn-privacy.config.json`.
 - **Merges, never overwrites.** Existing entries in your manifest are kept; it only adds what is missing.
   Dry run by default.
 - **Catches invalid manifests.** `check` validates every key, value type, reason code and data type against
@@ -153,10 +156,71 @@ branch. The GitHub Action shows the diff in the job summary and warns when the s
 SDKs can collect different data on Android than on iOS. For example, ad and attribution SDKs read the Android
 Advertising ID, and some vendors say their data is **shared** rather than only collected. Where the vendor
 publishes a Google Play Data safety disclosure (Firebase, AdMob, AppsFlyer, Adjust, Branch, OneSignal, RevenueCat,
-Braze, CleverTap, MoEngage), the Play answers in `report` and `play` come from it, with Play's own purposes such as
+Braze, CleverTap, MoEngage, BugSnag, Microsoft Clarity, Singular, Luciq), the Play answers in `report` and `play` come from it, with Play's own purposes such as
 Fraud prevention and Developer communications, and data the vendor calls shared is marked as shared. For the
 others, the answer comes from the iOS disclosure and the report marks it with †. When a vendor does not say why it
 collects something, rn-privacy leaves the purpose for you to choose instead of guessing.
+
+As of November 2026, Sentry, Datadog, LogRocket, Segment (for the Kotlin SDK React Native uses), Mixpanel,
+Amplitude, PostHog, Klaviyo, Meta, Intercom and Expo publish no Play Data safety guidance for their Android SDKs.
+If you know what one of them collects in your setup, describe it in [your own rules](#your-own-rules).
+CocoaPods and Swift packages are only in the iOS app, so they are left out of the Play answers.
+
+### Your own rules
+
+rn-privacy only knows public SDKs. Add `rn-privacy.config.json` next to your `package.json` to describe
+anything else: in-house SDKs (npm packages, CocoaPods pods or Swift packages), a public SDK set up differently
+from the default (your rule replaces the built-in one), and data your app itself collects, such as the email
+address your sign-in sends to your backend (a rule without `packages`).
+
+```json
+{
+  "$schema": "./node_modules/rn-privacy/config.schema.json",
+  "rules": [
+    {
+      "name": "Acme Analytics",
+      "packages": ["@acme/analytics-react-native", "AcmeAnalytics"],
+      "collects": [
+        { "type": "device-id", "purposes": ["analytics"], "linked": false, "tracking": false },
+        { "type": "user-id", "purposes": ["analytics"], "linked": true, "tracking": false, "conditional": "Only after login" }
+      ],
+      "android": {
+        "collects": [{ "type": "device-id", "purposes": ["analytics", "fraud-prevention"], "shared": false }]
+      },
+      "sources": ["https://wiki.example.com/acme-analytics/privacy"]
+    },
+    {
+      "name": "Sign-in",
+      "collects": [{ "type": "email", "purposes": ["app-functionality"], "linked": true, "tracking": false }],
+      "android": { "collects": [{ "type": "email", "purposes": ["account-management"] }] }
+    }
+  ]
+}
+```
+
+- `collects` uses Apple's terms and also feeds the Play answers, unless you add `android` with Play's purposes
+  (`app-functionality`, `analytics`, `developer-communications`, `advertising`, `fraud-prevention`,
+  `personalization`, `account-management`) and `shared`.
+- `"collects": []` says a package collects nothing. `versions` limits a rule to a semver range.
+- The `$schema` line gives you autocomplete and checks in VS Code and other editors. rn-privacy also checks the
+  file itself: a misspelled data type, a purpose that does not exist or a missing `linked` stops the command
+  with a list of what to fix, and a rule that matches no installed package is reported as a warning.
+
+Required reason APIs are never taken from rules, yours included: they always come from scanning the code.
+
+### Swift packages
+
+Packages you add in Xcode (**File > Add Package Dependencies**) are not in `node_modules` or `ios/Pods`.
+rn-privacy reads them from `Package.resolved` in `ios/*.xcworkspace` or `ios/*.xcodeproj`, then scans the copies
+Xcode downloaded: the privacy manifests, the source code and binary frameworks, like any other native library.
+It finds them in `ios/SourcePackages` (`xcodebuild -clonedSourcePackagesDirPath ios/SourcePackages`),
+`ios/build/SourcePackages`, or Xcode's DerivedData folder for the workspace (set `RN_PRIVACY_DERIVED_DATA` if
+yours is elsewhere). If they are not downloaded yet, for example on CI, rn-privacy says which packages it could
+not scan. To scan them on CI:
+
+```bash
+xcodebuild -resolvePackageDependencies -workspace ios/App.xcworkspace -scheme App -clonedSourcePackagesDirPath ios/SourcePackages
+```
 
 ### Android permissions
 
@@ -338,11 +402,13 @@ supported, because React Native itself needs `nodeLinker: node-modules`.
 
 1. Reads the `dependencies` in your `package.json` (not `devDependencies`), plus native packages they pull in
    (Expo autolinking links transitive modules too).
-2. For each package with iOS native code, scans `.m`, `.mm`, `.swift` and `.h` files (skipping `example/`,
+2. Adds the pods in `ios/Pods` and the Swift packages in `Package.resolved`.
+3. For each package with iOS native code, scans `.m`, `.mm`, `.swift` and `.h` files (skipping `example/`,
    tests and Android code) for the symbols Apple lists, and parses any `PrivacyInfo.xcprivacy` it ships.
-3. Looks the package up in the [rules database](src/rules.ts) for the data it collects, using the rule for
-   the installed version when a library's data collection changed between versions.
-4. Merges everything into one result.
+4. Looks the package up in your `rn-privacy.config.json`, then in the [rules database](src/rules.ts), for the
+   data it collects, using the rule for the installed version when a library's data collection changed between
+   versions.
+5. Merges everything into one result.
 
 When a library uses an API but gives no reason, rn-privacy suggests the reason most React Native apps use
 (the same ones React Native's own template uses) and marks it **suggested**. Review those: the right reason
@@ -352,10 +418,10 @@ into your app's manifest.
 ## Limits (please read)
 
 - **It is a starting point, not legal advice.** You are responsible for what you declare.
-- It only knows the data collection of libraries in its rules database. Libraries without a rule are still
-  scanned for required reason APIs, but their data collection is not known.
+- It only knows the data collection of libraries in its rules database and [your own rules](#your-own-rules).
+  Libraries without a rule are still scanned for required reason APIs, but their data collection is not known.
 - It cannot see what **your own code or backend** does with data (for example, sending the user's email
-  to your server). Add that yourself.
+  to your server). Describe it in `rn-privacy.config.json`.
 - What an SDK collects depends on its version and your configuration. Every rule links to the vendor's
   disclosure page: `rn-privacy report` lists them at the end. Check them.
 - `rn-privacy ios` will not edit a manifest that `check` reports as invalid. Fix those entries by hand first:

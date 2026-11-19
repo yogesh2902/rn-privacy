@@ -26,6 +26,17 @@
   Adjust, Branch, OneSignal, RevenueCat, Braze, CleverTap and MoEngage. `report` gets a Shared column and marks
   answers derived from iOS with †; `play` ticks "shared" and the sharing purposes, and leaves purposes the vendor
   does not state for you to choose.
+- **Your own rules in `rn-privacy.config.json`:** describe in-house or private SDKs (npm packages, CocoaPods pods
+  or Swift packages), replace a built-in rule, or declare data your app itself collects (a rule without
+  `packages`). The file is checked strictly, with a fix for each problem, and `config.schema.json` gives editors
+  autocomplete. Rules that match no installed package are reported.
+- **Swift Package Manager:** packages added in Xcode are read from `Package.resolved` (formats 1 to 3) and scanned
+  from `ios/SourcePackages`, `ios/build/SourcePackages` or Xcode's DerivedData: privacy manifests, source code and
+  binary targets. `audit` covers them and links their issue trackers, and the snapshot records their versions.
+  Packages that are not downloaded yet are named in a warning.
+- **Play disclosures for BugSnag, Microsoft Clarity, Singular and Luciq.** The other SDKs without one were checked:
+  their vendors publish no Play Data safety guidance, so their answers stay derived from iOS (marked †).
+- CocoaPods pods and Swift packages no longer add iOS-only data to the Google Play answers.
 - **Releases publish from GitHub** with npm trusted publishing, so packages carry a provenance statement
   (see RELEASING.md).
 - SDK tracking domains are normalized to domain names (Adjust lists URLs). The CLI reads its version from

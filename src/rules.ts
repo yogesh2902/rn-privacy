@@ -143,6 +143,17 @@ export const RULES: LibraryRule[] = [
       { type: 'user-id', purposes: ['app-functionality'], linked: true, tracking: false, conditional: 'Only if you call setUser()' },
     ],
     sources: ['https://docs.bugsnag.com/platforms/ios/appstore-privacy/'],
+    android: {
+      collects: [
+        { type: 'crash-data', purposes: ['analytics'] },
+        { type: 'performance-data', purposes: ['analytics'] },
+        { type: 'other-diagnostic', purposes: ['analytics'] },
+        { type: 'other-usage', purposes: ['analytics'] },
+        { type: 'device-id', purposes: ['analytics'] },
+      ],
+      sources: ['https://docs.bugsnag.com/platforms/android/playstore-privacy/'],
+      notes: 'BugSnag says Analytics is the only purpose. "Other actions" are breadcrumbs (in React Native also JavaScript, navigation and user interaction breadcrumbs); limit them with enabledBreadcrumbTypes. It generates a device ID that is also the default user ID. User data you set with setUser() must be declared too.',
+    },
   },
   {
     packages: ['@datadog/mobile-react-native'],
@@ -295,6 +306,15 @@ export const RULES: LibraryRule[] = [
     ],
     sources: ['https://learn.microsoft.com/en-us/clarity/mobile-sdk/sdk-apple-appstore-privacy-guidance'],
     notes: 'Microsoft gives "app owner market awareness" as the purpose for location and "SDK stability and performance" for performance data; rn-privacy maps them to Analytics and App functionality.',
+    android: {
+      collects: [
+        { type: 'product-interaction', purposes: ['analytics'] },
+        { type: 'crash-data', purposes: ['analytics'] },
+        { type: 'coarse-location', purposes: ['analytics'] },
+      ],
+      sources: ['https://learn.microsoft.com/en-us/clarity/mobile-sdk/sdk-google-playstore-privacy-guidance'],
+      notes: 'Microsoft lists taps and gestures, app errors, country or region, and device and app details (model, OS, screen size), used "to power" the dashboard, recordings and heatmaps; rn-privacy maps that to Analytics and country or region to Approximate location. Microsoft says Clarity does not transfer data to third parties.',
+    },
   },
   {
     packages: ['@logrocket/react-native'],
@@ -429,6 +449,16 @@ export const RULES: LibraryRule[] = [
     ],
     sources: ['https://github.com/singular-labs/Singular-iOS-SDK/blob/main/Sources/Singular/PrivacyInfo.xcprivacy'],
     notes: 'Singular declares tracking with the domain safetrack.singular.net. Run `rn-privacy ios --write --tracking` if your app uses App Tracking Transparency.',
+    android: {
+      collects: [
+        { type: 'device-id', purposes: ['analytics', 'fraud-prevention'] },
+        { type: 'product-interaction', purposes: ['analytics'] },
+        { type: 'purchase-history', purposes: ['analytics'], conditional: 'Only if you track revenue' },
+        { type: 'other-usage', purposes: ['analytics'], conditional: 'Only if you track custom events' },
+      ],
+      sources: ['https://support.singular.net/hc/en-us/articles/5755762951835-Submitting-the-Google-Play-Data-Safety-Section-Form'],
+      notes: 'Singular says it keeps data for attribution and analytics, and the IP address for fraud prevention; rn-privacy maps attribution to Analytics. Whether data is shared depends on your setup: postbacks to ad networks likely count as sharing. Custom events can also add in-app search history or user-generated content.',
+    },
   },
   // -------------------------------------------------- Push / purchases / misc
   {
@@ -495,6 +525,22 @@ export const RULES: LibraryRule[] = [
     ],
     sources: ['https://docs.luciq.ai/ios/setup-luciq-for-ios/custom-settings/privacy-settings/app-privacy-details'],
     notes: 'Luciq\'s page does not state purposes, linking or tracking: rn-privacy assumes App functionality, not linked. It also lists "Other data types" (device and app info). Name, email and photos are only sent if you identify users or users attach them to bug reports.',
+    android: {
+      collects: [
+        { type: 'coarse-location', purposes: [] },
+        { type: 'device-id', purposes: [] },
+        { type: 'crash-data', purposes: [] },
+        { type: 'performance-data', purposes: [] },
+        { type: 'product-interaction', purposes: [] },
+        { type: 'user-id', purposes: [], conditional: 'Only if you identify users' },
+        { type: 'email', purposes: [], conditional: 'Only if you set the user email' },
+        { type: 'name', purposes: [], conditional: 'Only if you set the user name' },
+        { type: 'photos-videos', purposes: [], conditional: 'Only if users attach them to bug reports' },
+        { type: 'other-usage', purposes: [], conditional: 'Only if you add custom data' },
+      ],
+      sources: ['https://docs.luciq.ai/android/set-up-luciq-for-android/play-store-privacy-details'],
+      notes: 'Luciq lists what it collects but not why or whether it is shared. Approximate location comes from the IP address (Luciq support can turn it off); most other data can be turned off with SDK APIs. In-app replies, if enabled, add "Other in-app messages".',
+    },
   },
   // ---------------------------------- Device access (declare only if sent off the device)
   {

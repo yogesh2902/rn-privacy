@@ -65,3 +65,13 @@ export function satisfies(version: string, range: string): boolean {
     return comps.every((comp) => satisfiesComparator(v, comp));
   });
 }
+
+/** True when every part of `range` is something `satisfies` understands. */
+export function isValidRange(range: string): boolean {
+  if (!range.trim()) return false;
+  const part = /^(>=|<=|>|<|=|\^|~)?v?\d+(\.(\d+|x|\*))?(\.(\d+|x|\*))?(-[\w.]+)?$/;
+  return range.split('||').every((set) => {
+    const comps = set.trim().replace(/(>=|<=|>|<|=|\^|~)\s+/g, '$1').split(/\s+/).filter(Boolean);
+    return comps.length > 0 && comps.every((c) => c === '*' || c === 'x' || part.test(c));
+  });
+}

@@ -1,0 +1,222 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://unpkg.com/rn-privacy/config.schema.json",
+  "title": "rn-privacy.config.json",
+  "description": "Your own rn-privacy rules: SDKs rn-privacy does not know (in-house, private, CocoaPods or Swift packages), replacements for built-in rules, and data your app itself collects. https://github.com/yogesh2902/rn-privacy#your-own-rules",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string"
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/rule"
+      }
+    }
+  },
+  "$defs": {
+    "dataType": {
+      "enum": [
+        "device-id",
+        "user-id",
+        "email",
+        "name",
+        "phone",
+        "crash-data",
+        "performance-data",
+        "other-diagnostic",
+        "product-interaction",
+        "advertising-data",
+        "other-usage",
+        "coarse-location",
+        "precise-location",
+        "purchase-history",
+        "contacts",
+        "photos-videos",
+        "audio",
+        "health"
+      ]
+    },
+    "purpose": {
+      "enum": [
+        "app-functionality",
+        "analytics",
+        "third-party-advertising",
+        "developer-advertising",
+        "product-personalization",
+        "other"
+      ]
+    },
+    "playPurpose": {
+      "enum": [
+        "app-functionality",
+        "analytics",
+        "developer-communications",
+        "advertising",
+        "fraud-prevention",
+        "personalization",
+        "account-management"
+      ]
+    },
+    "rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name"
+      ],
+      "anyOf": [
+        {
+          "required": [
+            "collects"
+          ]
+        },
+        {
+          "required": [
+            "android"
+          ]
+        },
+        {
+          "required": [
+            "accesses"
+          ]
+        }
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The SDK name, or what your app collects (for example \"Sign-in\")."
+        },
+        "packages": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "npm packages, CocoaPods pods or Swift packages this rule covers. Leave it out for data your app itself collects."
+        },
+        "versions": {
+          "type": "string",
+          "description": "Semver range of package versions this rule is for, for example \">=6.0.0\"."
+        },
+        "collects": {
+          "type": "array",
+          "description": "What it collects, in Apple terms. Also used for Google Play when there is no \"android\" section.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type",
+              "purposes",
+              "linked",
+              "tracking"
+            ],
+            "properties": {
+              "type": {
+                "$ref": "#/$defs/dataType"
+              },
+              "purposes": {
+                "type": "array",
+                "minItems": 1,
+                "items": {
+                  "$ref": "#/$defs/purpose"
+                }
+              },
+              "linked": {
+                "type": "boolean",
+                "description": "Is the data linked to the user identity?"
+              },
+              "tracking": {
+                "type": "boolean",
+                "description": "Is it used for tracking, as App Tracking Transparency defines it?"
+              },
+              "conditional": {
+                "type": "string",
+                "description": "Only collected in some setups, for example \"Only if you call identify()\"."
+              }
+            }
+          }
+        },
+        "android": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "collects"
+          ],
+          "description": "What the Android version collects, in Google Play terms.",
+          "properties": {
+            "collects": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "type"
+                ],
+                "properties": {
+                  "type": {
+                    "$ref": "#/$defs/dataType"
+                  },
+                  "purposes": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/playPurpose"
+                    }
+                  },
+                  "shared": {
+                    "type": "boolean",
+                    "description": "Is the data transferred to a third party?"
+                  },
+                  "conditional": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "notes": {
+              "type": "string"
+            }
+          }
+        },
+        "accesses": {
+          "type": "array",
+          "description": "Sensitive data it can read on the device (declare only if it leaves the device).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "type"
+            ],
+            "properties": {
+              "type": {
+                "$ref": "#/$defs/dataType"
+              },
+              "note": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Links the rule is based on."
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}
