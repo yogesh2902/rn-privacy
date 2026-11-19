@@ -155,6 +155,7 @@ export function scanPackage(name: string, pkgDir: string): PackageReport {
   const report: PackageReport = {
     name,
     version: pkg.version ?? '?',
+    dir: pkgDir,
     hasIosNative: hasIosNative(pkgDir),
     shipsManifest: [],
     hasBinaryFramework: false,
@@ -298,6 +299,7 @@ export function scanPods(projectDir: string): PackageReport[] {
     const report: PackageReport = {
       name: `${pod.name} (CocoaPods)`,
       version: '-',
+      dir: podsDir,
       hasIosNative: true,
       shipsManifest: [],
       hasBinaryFramework: false,

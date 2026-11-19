@@ -19,6 +19,7 @@ import * as api from '../dist/index.js';
 import { audit } from '../dist/audit.js';
 import { issuesUrl } from '../dist/scanner.js';
 import { isAppleBinary, scanBinary } from '../dist/binary.js';
+import { suggestFixes, suggestionIssue } from '../dist/suggest.js';
 
 const CLI = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'dist', 'cli.js');
 const run = (cwd, ...args) => spawnSync(process.execPath, [CLI, ...args], { cwd, encoding: 'utf8', env: { ...process.env, NO_COLOR: '1' } });
@@ -668,6 +669,47 @@ test('package layouts: pnpm symlinks, workspaces, Yarn Plug\'n\'Play', () => {
   const w = analyze(scanProject(pnp)).warnings;
   assert.equal(w.length, 1);
   assert.match(w[0].message, /nodeLinker: node-modules/);
+});
+
+test('audit --suggest: valid fixed manifests and issue texts, nothing guessed', () => {
+  const dir = fixture('suggest');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { '@segment/analytics-react-native': '2.0.0', 'fs-lib': '1.0.0', 'partial': '1.0.0' } },
+    // Like Segment's real manifest: an empty purpose and a made-up data type.
+    'node_modules/@segment/analytics-react-native/package.json': { name: '@segment/analytics-react-native', version: '2.0.0', repository: 'github:segmentio/analytics-react-native' },
+    'node_modules/@segment/analytics-react-native/ios/PrivacyInfo.xcprivacy': libManifest('<key>NSPrivacyTrackingDomains</key><array><string>https://t.example.com/x</string></array><key>NSPrivacyCollectedDataTypes</key><array><dict><key>NSPrivacyCollectedDataType</key><string>NSPrivacyCollectedDataTypeDeviceID</string><key>NSPrivacyCollectedDataTypeLinked</key><true/><key>NSPrivacyCollectedDataTypeTracking</key><false/><key>NSPrivacyCollectedDataTypePurposes</key><array><string></string></array></dict><dict><key>NSPrivacyCollectedDataType</key><string>App Name</string><key>NSPrivacyCollectedDataTypeLinked</key><false/><key>NSPrivacyCollectedDataTypeTracking</key><false/><key>NSPrivacyCollectedDataTypePurposes</key><array><string>NSPrivacyCollectedDataTypePurposeAnalytics</string></array></dict></array>'),
+    'node_modules/fs-lib/package.json': { name: 'fs-lib', version: '1.0.0' },
+    'node_modules/fs-lib/fs-lib.podspec': '',
+    'node_modules/fs-lib/ios/F.m': 'NSDictionary *a = x[NSFileSystemFreeSize];',
+    'node_modules/partial/package.json': { name: 'partial', version: '1.0.0' },
+    'node_modules/partial/ios/P.swift': 'let t = ProcessInfo.processInfo.systemUptime',
+    'node_modules/partial/ios/PrivacyInfo.xcprivacy': manifestXml([['NSPrivacyAccessedAPICategoryUserDefaults', 'NOPE.1']]),
+  });
+  const sugs = Object.fromEntries(suggestFixes(scanProject(dir)).map((x) => [x.pkg, x]));
+  assert.deepEqual(Object.keys(sugs).sort(), ['@segment/analytics-react-native', 'fs-lib', 'partial']);
+  for (const sug of Object.values(sugs)) {
+    assert.deepEqual(validateManifest(sug.manifest, { sdk: true }).filter((p) => p.level === 'error'), [], `${sug.pkg} suggestion is valid`);
+  }
+  const seg = sugs['@segment/analytics-react-native'];
+  assert.deepEqual(seg.manifest.NSPrivacyCollectedDataTypes.map((d) => d.NSPrivacyCollectedDataType), ['NSPrivacyCollectedDataTypeDeviceID'], '"App Name" removed');
+  assert.ok(seg.manifest.NSPrivacyCollectedDataTypes[0].NSPrivacyCollectedDataTypePurposes.length, 'purpose filled from the rule');
+  assert.ok(seg.decide.some((d) => d.includes('confirm the purposes')), 'and the maintainer is asked to confirm');
+  assert.deepEqual(seg.manifest.NSPrivacyTrackingDomains, ['t.example.com']);
+  assert.deepEqual(sugs['fs-lib'].manifest.NSPrivacyAccessedAPITypes, [{ NSPrivacyAccessedAPIType: 'NSPrivacyAccessedAPICategoryDiskSpace', NSPrivacyAccessedAPITypeReasons: ['E174.1'] }]);
+  const partial = sugs.partial.manifest.NSPrivacyAccessedAPITypes.map((t) => [t.NSPrivacyAccessedAPIType.replace('NSPrivacyAccessedAPICategory', ''), t.NSPrivacyAccessedAPITypeReasons]);
+  assert.deepEqual(partial, [['UserDefaults', ['CA92.1']], ['SystemBootTime', ['35F9.1']]], 'invalid reason replaced (to decide), missing category added');
+
+  const issue = suggestionIssue(seg);
+  assert.match(issue.title, /needs a fix/);
+  assert.match(issue.body, /"App Name" is not a valid collected data type/);
+  assert.match(issue.body, /```xml\n<\?xml/);
+  assert.match(suggestionIssue(sugs['fs-lib']).title, /Add an iOS privacy manifest/);
+
+  const out = run(dir, 'audit', '--suggest', '-o', 'fixes');
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /post at https:\/\/github.com\/segmentio\/analytics-react-native\/issues/);
+  assert.ok(fs.existsSync(path.join(dir, 'fixes/segment-analytics-react-native/PrivacyInfo.xcprivacy')));
+  assert.ok(fs.existsSync(path.join(dir, 'fixes/fs-lib/ISSUE.md')));
 });
 
 test('issuesUrl understands the usual package.json forms', () => {

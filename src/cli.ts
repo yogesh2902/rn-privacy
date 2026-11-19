@@ -10,6 +10,7 @@ import { fillPlayCsv } from './play.js';
 import { validateManifest } from './validate.js';
 import { formatCheck, readExpoPrivacy, runCheck } from './check.js';
 import { AD_ID } from './android.js';
+import { suggestFixes, suggestionIssue, suggestionManifest } from './suggest.js';
 import { buildSnapshot, changeCount, diffSnapshots, formatDiff, loadBaseSnapshot, SNAPSHOT_FILE, snapshotText } from './snapshot.js';
 import { c, formatAudit, formatMarkdown, formatScan, toJson } from './report.js';
 import { scanProject } from './scanner.js';
@@ -39,9 +40,10 @@ ${c.bold('Options')}
       --include-conditional (ios, play) Also declare data collected only in some setups
       --tracking            (ios) Your app tracks users: set NSPrivacyTracking and add your libraries' tracking domains
       --strict              (audit, diff) Exit with code 1 when there is a problem or a change
+      --suggest             (audit) Write a fixed PrivacyInfo.xcprivacy and an issue text for each library
       --base <file|ref>     (diff) Snapshot to compare with: a file, or a git ref such as origin/main
   -f, --format <md|json>    (report, scan, audit, check, diff) Output format (default: md for report)
-  -o, --out <file>          (report, play, snapshot) Write to a file instead of the terminal
+  -o, --out <file>          (report, play, snapshot) Write to a file instead of the terminal; (audit --suggest) folder
   -h, --help                Show this help
   -v, --version             Show the version
 
@@ -60,6 +62,7 @@ function main(argv: string[]): number {
       write: { type: 'boolean', short: 'w' },
       'include-conditional': { type: 'boolean' },
       tracking: { type: 'boolean' },
+      suggest: { type: 'boolean' },
       strict: { type: 'boolean' },
       base: { type: 'string' },
       format: { type: 'string', short: 'f' },
@@ -220,6 +223,24 @@ function main(argv: string[]): number {
 
     case 'audit': {
       const result = audit(scan);
+      if (values.suggest) {
+        const suggestions = suggestFixes(scan);
+        if (!suggestions.length) return print(c.green('✓ No library needs a fix.'));
+        const outDir = path.resolve(projectDir, values.out ?? 'rn-privacy-suggestions');
+        print(c.bold(`Suggested fixes for ${suggestions.length} librar${suggestions.length === 1 ? 'y' : 'ies'}`) + c.dim(`  (${path.relative(process.cwd(), outDir) || outDir})`) + '\n');
+        for (const sug of suggestions) {
+          const dir = path.join(outDir, sug.pkg.replace(/^@/, '').replace(/[/\\ ()]+/g, '-').replace(/-+$/, ''));
+          fs.mkdirSync(dir, { recursive: true });
+          fs.writeFileSync(path.join(dir, 'PrivacyInfo.xcprivacy'), suggestionManifest(sug));
+          const issue = suggestionIssue(sug);
+          fs.writeFileSync(path.join(dir, 'ISSUE.md'), `# ${issue.title}\n\n${issue.body}`);
+          print(`  ${c.bold(sug.pkg)}  ${c.dim(`${sug.changes.length} change(s), ${sug.decide.length} to decide`)}`);
+          print(c.dim(`    ${path.relative(process.cwd(), dir)}/PrivacyInfo.xcprivacy  → goes to ${sug.manifestPath} in the library`));
+          print(c.dim(`    ${path.relative(process.cwd(), dir)}/ISSUE.md`) + (sug.issuesUrl ? c.dim(`  → post at ${sug.issuesUrl}`) : ''));
+        }
+        print('\n' + c.dim('Review each file before posting: static analysis can be wrong.'));
+        return 0;
+      }
       print(values.format === 'json' ? JSON.stringify(result, null, 2) : formatAudit(result));
       return values.strict && auditProblemCount(result) ? 1 : 0;
     }

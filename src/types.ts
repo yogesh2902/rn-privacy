@@ -121,6 +121,8 @@ export type ApiEvidence =
 export interface PackageReport {
   name: string;
   version: string;
+  /** Folder the manifest and evidence paths are relative to (the package, or ios/Pods). */
+  dir?: string;
   hasIosNative: boolean;
   shipsManifest: string[];
   hasBinaryFramework: boolean;

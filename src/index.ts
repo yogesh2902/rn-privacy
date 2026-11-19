@@ -2,6 +2,8 @@ export { scanProject, scanPackage, issuesUrl } from './scanner.js';
 export { analyze, toApiUsages, toCollected, trackingDomains } from './analyze.js';
 export { audit, auditProblemCount } from './audit.js';
 export { runCheck } from './check.js';
+export { suggestFixes, suggestionIssue, suggestionManifest } from './suggest.js';
+export type { Suggestion } from './suggest.js';
 export { buildSnapshot, diffSnapshots, loadBaseSnapshot, SNAPSHOT_FILE } from './snapshot.js';
 export type { Snapshot, SnapshotDiff, Change } from './snapshot.js';
 export type { CheckResult, CheckedManifest, ManifestStatus } from './check.js';
