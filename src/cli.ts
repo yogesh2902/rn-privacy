@@ -10,6 +10,7 @@ import { fillPlayCsv } from './play.js';
 import { validateManifest } from './validate.js';
 import { formatCheck, readExpoPrivacy, runCheck } from './check.js';
 import { AD_ID } from './android.js';
+import { buildSnapshot, changeCount, diffSnapshots, formatDiff, loadBaseSnapshot, SNAPSHOT_FILE, snapshotText } from './snapshot.js';
 import { c, formatAudit, formatMarkdown, formatScan, toJson } from './report.js';
 import { scanProject } from './scanner.js';
 
@@ -28,15 +29,18 @@ ${c.bold('Commands')}
   play      Fill in the Data safety CSV exported from Play Console: rn-privacy play data_safety.csv -o filled.csv
   check     For CI: exit with code 1 if your manifest is missing or invalid
   audit     Check the privacy manifests your libraries ship, and where to report problems
+  snapshot  Save what your dependencies need to privacy-snapshot.json (commit it)
+  diff      Show privacy changes since the snapshot: new APIs, data, tracking, permissions
 
 ${c.bold('Options')}
   -p, --project <dir>       App folder (default: current folder)
   -w, --write               (ios) Write the changes instead of only showing them
       --include-conditional (ios, play) Also declare data collected only in some setups
       --tracking            (ios) Your app tracks users: set NSPrivacyTracking and add your libraries' tracking domains
-      --strict              (audit) Exit with code 1 when a library has a problem
-  -f, --format <md|json>    (report, scan, audit, check) Output format (default: md for report)
-  -o, --out <file>          (report, play) Write to a file instead of the terminal
+      --strict              (audit, diff) Exit with code 1 when there is a problem or a change
+      --base <file|ref>     (diff) Snapshot to compare with: a file, or a git ref such as origin/main
+  -f, --format <md|json>    (report, scan, audit, check, diff) Output format (default: md for report)
+  -o, --out <file>          (report, play, snapshot) Write to a file instead of the terminal
   -h, --help                Show this help
   -v, --version             Show the version
 
@@ -56,6 +60,7 @@ function main(argv: string[]): number {
       'include-conditional': { type: 'boolean' },
       tracking: { type: 'boolean' },
       strict: { type: 'boolean' },
+      base: { type: 'string' },
       format: { type: 'string', short: 'f' },
       out: { type: 'string', short: 'o' },
       help: { type: 'boolean', short: 'h' },
@@ -68,7 +73,7 @@ function main(argv: string[]): number {
 
   const command = positionals[0] ?? 'scan';
   const projectDir = path.resolve(values.project ?? process.cwd());
-  if (!['scan', 'ios', 'report', 'play', 'check', 'audit'].includes(command)) {
+  if (!['scan', 'ios', 'report', 'play', 'check', 'audit', 'snapshot', 'diff'].includes(command)) {
     console.error(`Unknown command "${command}".\n\n${HELP}`);
     return 2;
   }
@@ -190,6 +195,26 @@ function main(argv: string[]): number {
         print(c.dim('\nDry run. Add -o filled.csv to save the filled file.'));
       }
       return 0;
+    }
+
+    case 'snapshot': {
+      const file = path.resolve(projectDir, values.out ?? SNAPSHOT_FILE);
+      const text = snapshotText(buildSnapshot(scan, analysis));
+      const before = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : null;
+      fs.writeFileSync(file, text);
+      const rel = path.relative(process.cwd(), file) || file;
+      return print(before === text ? c.green(`${rel} is up to date.`) : c.green(`${before === null ? 'Wrote' : 'Updated'} ${rel}. Commit it so pull requests show privacy changes.`));
+    }
+
+    case 'diff': {
+      const base = loadBaseSnapshot(projectDir, values.base);
+      if (!base.snapshot) {
+        console.error(c.red(`✗ ${base.error}`));
+        return 1;
+      }
+      const result = diffSnapshots(base.snapshot, buildSnapshot(scan, analysis));
+      print(values.format === 'json' ? JSON.stringify({ against: base.label, changes: changeCount(result), ...result }, null, 2) : formatDiff(result, base.label, c));
+      return values.strict && changeCount(result) ? 1 : 0;
     }
 
     case 'audit': {

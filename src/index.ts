@@ -2,6 +2,8 @@ export { scanProject, scanPackage, issuesUrl } from './scanner.js';
 export { analyze, toApiUsages, toCollected, trackingDomains } from './analyze.js';
 export { audit, auditProblemCount } from './audit.js';
 export { runCheck } from './check.js';
+export { buildSnapshot, diffSnapshots, loadBaseSnapshot, SNAPSHOT_FILE } from './snapshot.js';
+export type { Snapshot, SnapshotDiff, Change } from './snapshot.js';
 export type { CheckResult, CheckedManifest, ManifestStatus } from './check.js';
 export type { Audit, LibraryRef } from './audit.js';
 export type { Analysis, ApiFinding, DataFinding, Warning } from './analyze.js';

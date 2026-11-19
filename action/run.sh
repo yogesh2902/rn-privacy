@@ -26,6 +26,15 @@ echo "result=$result" >> "${GITHUB_OUTPUT:-/dev/null}"
   esac
 done <<< "$out"
 
+# Privacy changes since the committed snapshot (privacy-snapshot.json), when the project has one.
+diff_out=""
+if [ -f privacy-snapshot.json ]; then
+  diff_out="$(npx --yes --package "$spec" rn-privacy diff 2>&1)"
+  if ! echo "$diff_out" | grep -q "No privacy changes\|no privacy changes"; then
+    [ "${INPUT_ANNOTATIONS:-true}" = "true" ] && echo "::warning title=rn-privacy::Privacy changes are not in privacy-snapshot.json. Review them, then run npx rn-privacy snapshot and commit it."
+  fi
+fi
+
 if [ "${INPUT_SUMMARY:-true}" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
   {
     if [ "$result" = pass ]; then
@@ -40,6 +49,14 @@ if [ "${INPUT_SUMMARY:-true}" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; t
     echo "$out"
     echo '```'
     echo
+    if [ -n "$diff_out" ]; then
+      echo "### Privacy changes since privacy-snapshot.json"
+      echo
+      echo '```'
+      echo "$diff_out"
+      echo '```'
+      echo
+    fi
     echo "<details><summary>Library audit: privacy manifests your libraries ship</summary>"
     echo
     echo '```'

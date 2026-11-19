@@ -592,6 +592,47 @@ test('binary: finds required reason APIs in prebuilt frameworks', () => {
   assert.deepEqual(boot, [{ kind: 'binary', file: path.join('ios', 'Sdk.xcframework', 'ios-arm64', 'Sdk.framework', 'Sdk'), symbol: 'mach_absolute_time' }]);
 });
 
+test('snapshot and diff, from a file and from a git ref', () => {
+  const dir = fixture('snapshot');
+  const git = (...args) => execFileSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: dir, encoding: 'utf8' });
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { storage: '1.0.0' } },
+    'node_modules/storage/package.json': { name: 'storage', version: '1.0.0' },
+    'node_modules/storage/storage.podspec': '',
+    'node_modules/storage/ios/S.swift': 'UserDefaults.standard.set(1, forKey: "k")',
+  });
+  assert.equal(run(dir, 'diff').status, 1, 'no snapshot yet');
+  assert.match(run(dir, 'diff').stderr, /Run `rn-privacy snapshot`/);
+  assert.equal(run(dir, 'snapshot').status, 0);
+  const first = fs.readFileSync(path.join(dir, 'privacy-snapshot.json'), 'utf8');
+  assert.match(run(dir, 'snapshot').stdout, /up to date/, 'stable: no dates or paths');
+  assert.equal(fs.readFileSync(path.join(dir, 'privacy-snapshot.json'), 'utf8'), first);
+  git('init', '-q'); git('add', '.'); git('commit', '-qm', 'base');
+
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { storage: '1.1.0', 'fs-lib': '2.0.0' } },
+    'node_modules/storage/package.json': { name: 'storage', version: '1.1.0' },
+    'node_modules/fs-lib/package.json': { name: 'fs-lib', version: '2.0.0' },
+    'node_modules/fs-lib/fs-lib.podspec': '',
+    'node_modules/fs-lib/ios/F.m': 'NSDictionary *a = x[NSFileSystemFreeSize];',
+    'node_modules/fs-lib/android/src/main/AndroidManifest.xml': '<manifest><uses-permission android:name="android.permission.READ_MEDIA_IMAGES"/></manifest>',
+  });
+  const diff = run(dir, 'diff');
+  assert.equal(diff.status, 0);
+  assert.match(diff.stdout, /\+ Disk space\s+fs-lib/);
+  assert.match(diff.stdout, /\+ Photos\s+fs-lib/);
+  assert.match(diff.stdout, /~ storage\s+1\.0\.0 → 1\.1\.0/);
+  assert.equal(run(dir, 'diff', '--strict').status, 1);
+
+  const json = JSON.parse(run(dir, 'diff', '--base', 'HEAD', '--format', 'json').stdout);
+  assert.equal(json.against, 'HEAD:privacy-snapshot.json');
+  assert.deepEqual(json.apis, [{ kind: 'added', label: 'Disk space', detail: 'fs-lib' }]);
+
+  run(dir, 'snapshot');
+  assert.match(run(dir, 'diff').stdout, /No privacy changes/);
+  assert.equal(run(dir, 'diff', '--base', 'no-such-ref').status, 1);
+});
+
 test('issuesUrl understands the usual package.json forms', () => {
   assert.equal(issuesUrl({ bugs: 'https://x.dev/bugs' }), 'https://x.dev/bugs');
   assert.equal(issuesUrl({ bugs: { url: 'https://x.dev/b' } }), 'https://x.dev/b');
