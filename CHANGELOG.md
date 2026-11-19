@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0
+- **`rn-privacy audit`:** checks the privacy manifests your libraries ship. It finds invalid manifests (made-up
+  data types, empty purposes, unreadable files), libraries that use required reason APIs without a manifest,
+  and manifests that miss categories the code uses, with a link to each library's issue tracker. `--strict`
+  exits with code 1 on a problem. `scan` and `report` summarize it, and the GitHub Action adds it to the job summary.
+- **Tracking domains:** rn-privacy reads `NSPrivacyTracking` and `NSPrivacyTrackingDomains` from your libraries'
+  manifests (CocoaPods SDKs included) and lists them in `scan` and `report`. `ios --write --tracking` (or the
+  Expo plugin's `{ "tracking": true }`) sets `NSPrivacyTracking` and declares those domains. Tracking is still
+  never turned on without asking. `check` warns when tracking is on but a library's domain is missing.
+- **`check --format json`:** the full result (status of each manifest, missing APIs, validation errors, undeclared
+  data, missing tracking domains, a hint) for CI tools and bots. The exit code is unchanged.
+- **EAS Build:** README section on running `check` in the `eas-build-post-install` hook, which on iOS runs after
+  prebuild and pod install, so every EAS build is checked against the files that ship.
+- Library manifests are validated as SDK manifests, so the SDK-only reasons (`C56D.1`, `0A2A.1`) are allowed there.
+
 ## 0.2.0
 - **Expo config plugin:** add `"plugins": ["rn-privacy"]` and every prebuild merges what your libraries need
   into `expo.ios.privacyManifests`, so the generated manifest is always current. `check` recognizes the plugin.

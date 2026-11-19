@@ -65,6 +65,11 @@ export function manifestCollected(m: PrivacyManifest): CollectedData[] {
   return out;
 }
 
+export interface MergeOptions {
+  /** Declare tracking: sets NSPrivacyTracking to true and adds these domains. Only when the user asks for it. */
+  tracking?: { domains: string[] };
+}
+
 /**
  * Merge new API usages and collected data into an existing manifest.
  * Nothing already in the manifest is removed: we only add.
@@ -73,6 +78,7 @@ export function mergeManifest(
   existing: PrivacyManifest,
   apis: ApiUsage[],
   collected: CollectedData[],
+  options: MergeOptions = {},
 ): { manifest: PrivacyManifest; added: string[] } {
   const manifest: PrivacyManifest = structuredClone(existing);
   const added: string[] = [];
@@ -125,10 +131,22 @@ export function mergeManifest(
     }
   }
 
-  // NSPrivacyTracking is deliberately never switched on automatically: it has
-  // App Tracking Transparency consequences, so we only warn about it.
+  // NSPrivacyTracking is never switched on automatically: it has App Tracking
+  // Transparency consequences. Only an explicit `tracking` option (ios --tracking) does it.
   manifest.NSPrivacyTracking ??= false;
   manifest.NSPrivacyTrackingDomains ??= [];
+  if (options.tracking) {
+    if (manifest.NSPrivacyTracking !== true) {
+      manifest.NSPrivacyTracking = true;
+      added.push('NSPrivacyTracking → true');
+    }
+    for (const d of options.tracking.domains) {
+      if (!manifest.NSPrivacyTrackingDomains.includes(d)) {
+        manifest.NSPrivacyTrackingDomains.push(d);
+        added.push(`tracking domain: ${d}`);
+      }
+    }
+  }
   return { manifest, added };
 }
 

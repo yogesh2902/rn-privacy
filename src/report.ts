@@ -1,6 +1,9 @@
 import { API_LABELS, DEFAULT_REASONS } from './apis.js';
 import { DATA_TYPES, PURPOSES } from './types.js';
 import type { Analysis, DataFinding } from './analyze.js';
+import { trackingDomains } from './analyze.js';
+import { audit as runAudit, auditProblemCount, categoryList } from './audit.js';
+import type { Audit, LibraryRef } from './audit.js';
 import type { Purpose, ScanResult } from './types.js';
 
 const useColor = process.stdout.isTTY && !process.env.NO_COLOR;
@@ -47,6 +50,20 @@ export function formatScan(scan: ScanResult, a: Analysis): string {
     lines.push('');
   }
 
+  if (a.tracking.length) {
+    lines.push(c.bold('Tracking declared by your libraries'));
+    for (const t of a.tracking) {
+      lines.push(`  ${t.pkg.padEnd(22)} ${t.domains.length ? t.domains.join(', ') : c.dim('no domains listed')}${t.declaresTracking ? '' : c.dim(' (tracking off)')}`);
+    }
+    lines.push(c.dim('  If your app tracks users (App Tracking Transparency), run `rn-privacy ios --write --tracking` to declare these.'), '');
+  }
+
+  const libAudit = runAudit(scan);
+  const problems = auditProblemCount(libAudit);
+  if (problems) {
+    lines.push(c.bold('Library audit') + c.dim(`  ${problems} librar${problems === 1 ? 'y has' : 'ies have'} privacy manifest problems. Run \`rn-privacy audit\` for details.`), '');
+  }
+
   const noManifest = native.filter((p) => !p.shipsManifest.length && p.apis.size);
   if (noManifest.length) {
     lines.push(c.bold('Native libraries without their own privacy manifest'));
@@ -66,6 +83,70 @@ export function formatScan(scan: ScanResult, a: Analysis): string {
 
   lines.push(c.dim('Next: `rn-privacy ios` to update your privacy manifest, `rn-privacy report` for the store forms.'));
   lines.push(c.dim('These results are a starting point. Check each library\'s own docs before you submit.'));
+  return lines.join('\n');
+}
+
+// -------------------------------------------------------------------- audit
+
+const MAX_ISSUES = 5;
+
+export function formatAudit(a: Audit): string {
+  const lines: string[] = [];
+  lines.push(c.bold('rn-privacy audit') + c.dim(`  (${a.nativePackages} native ${a.nativePackages === 1 ? 'library' : 'libraries'}, ${a.withManifest} ${a.withManifest === 1 ? 'ships' : 'ship'} a privacy manifest)`), '');
+  const name = (r: LibraryRef) => c.bold(r.version && r.version !== '-' ? `${r.pkg}@${r.version}` : r.pkg);
+  const reportTo = (r: LibraryRef) => r.issuesUrl && lines.push(c.dim(`    Report it: ${r.issuesUrl}`));
+
+  if (a.invalid.length) {
+    lines.push(c.red(c.bold(`✗ Invalid privacy manifest (${a.invalid.length})`)), c.dim('  Apple may reject or ignore these files.'));
+    for (const r of a.invalid) {
+      lines.push(`  ${name(r)}`);
+      for (const i of r.issues.slice(0, MAX_ISSUES)) lines.push(`    ${c.dim(i.file + ':')} ${i.message}`);
+      if (r.issues.length > MAX_ISSUES) lines.push(c.dim(`    ...and ${r.issues.length - MAX_ISSUES} more`));
+      reportTo(r);
+    }
+    lines.push('');
+  }
+
+  if (a.undeclared.length) {
+    lines.push(c.yellow(c.bold(`! Uses required reason APIs without a privacy manifest (${a.undeclared.length})`)));
+    for (const r of a.undeclared) {
+      lines.push(`  ${name(r)}  ${categoryList(r.categories)}`);
+      if (r.evidence.length) lines.push(c.dim(`    found in ${r.evidence.join(', ')}`));
+      reportTo(r);
+    }
+    lines.push('');
+  }
+
+  if (a.incomplete.length) {
+    lines.push(c.yellow(c.bold(`! Privacy manifest misses APIs its code uses (${a.incomplete.length})`)));
+    for (const r of a.incomplete) {
+      lines.push(`  ${name(r)}  missing ${categoryList(r.missing)}`);
+      if (r.evidence.length) lines.push(c.dim(`    found in ${r.evidence.join(', ')}`));
+      reportTo(r);
+    }
+    lines.push('');
+  }
+
+  if (a.questionable.length) {
+    lines.push(c.bold(`Possible mistakes (${a.questionable.length})`));
+    for (const r of a.questionable) {
+      lines.push(`  ${name(r)}`);
+      for (const i of r.issues.slice(0, MAX_ISSUES)) lines.push(c.dim(`    ${i.file}: ${i.message}`));
+    }
+    lines.push('');
+  }
+
+  if (a.tracking.length) {
+    lines.push(c.bold(`Tracking declared by libraries (${a.tracking.length})`));
+    for (const r of a.tracking) lines.push(`  ${name(r)}  ${r.domains.length ? r.domains.join(', ') : c.dim('no domains listed')}`);
+    lines.push('');
+  }
+
+  if (!auditProblemCount(a) && !a.questionable.length) lines.push(c.green('✓ No problems found in your libraries\' privacy manifests.'), '');
+  else {
+    lines.push(c.dim('Your app is still covered: rn-privacy adds what these libraries use to your app\'s own manifest.'));
+    lines.push(c.dim('Static analysis can be wrong: check the file before you report it. A report helps every app using the library.'));
+  }
   return lines.join('\n');
 }
 
@@ -137,6 +218,24 @@ export function formatMarkdown(scan: ScanResult, a: Analysis): string {
   }
   out.push('');
 
+  if (a.tracking.length) {
+    out.push('## Tracking', '');
+    out.push('These libraries declare tracking in their own privacy manifest. If your app tracks users (App Tracking Transparency),', 'set `NSPrivacyTracking` to true and declare these domains: `rn-privacy ios --write --tracking` does both.', '');
+    out.push('| Library | Tracking domains |', '| --- | --- |');
+    for (const t of a.tracking) out.push(`| ${t.pkg} | ${t.domains.join(', ') || '(none listed)'} |`);
+    out.push('', `All domains: ${trackingDomains(a).map((d) => `\`${d}\``).join(', ') || '(none)'}`, '');
+  }
+
+  const libAudit = runAudit(scan);
+  if (auditProblemCount(libAudit)) {
+    out.push('## Library privacy manifests', '');
+    out.push('Your app manifest covers these, but the libraries themselves have problems worth reporting to their maintainers (`rn-privacy audit`):', '');
+    for (const r of libAudit.invalid) out.push(`- **${r.pkg}**: invalid manifest (${r.issues.length} problem${r.issues.length === 1 ? '' : 's'})`);
+    for (const r of libAudit.undeclared) out.push(`- **${r.pkg}**: uses ${categoryList(r.categories)} without a privacy manifest`);
+    for (const r of libAudit.incomplete) out.push(`- **${r.pkg}**: manifest misses ${categoryList(r.missing)}`);
+    out.push('');
+  }
+
   if (a.warnings.length) {
     out.push('## Warnings', '');
     for (const w of a.warnings) out.push(`- ${w.pkg ? `**${w.pkg}**: ` : ''}${w.message}`);
@@ -182,5 +281,7 @@ export function toJson(scan: ScanResult, a: Analysis) {
       ruleVersions: p.rule?.versions,
     })),
     warnings: a.warnings,
+    tracking: a.tracking,
+    trackingDomains: trackingDomains(a),
   };
 }

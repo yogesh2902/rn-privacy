@@ -16,6 +16,7 @@ npx rn-privacy ios --write  # update PrivacyInfo.xcprivacy (bare) or app.json (E
 npx rn-privacy report -o store-privacy.md  # answers for both store forms
 npx rn-privacy play data_safety.csv -o filled.csv  # fill Google Play's Data safety CSV
 npx rn-privacy check      # for CI: fails if the manifest is missing something or invalid
+npx rn-privacy audit      # problems in the privacy manifests your libraries ship
 ```
 
 **Expo?** Add the config plugin and the manifest is generated on every prebuild, so it never falls behind:
@@ -41,6 +42,10 @@ npx rn-privacy check      # for CI: fails if the manifest is missing something o
   Apple's lists, so you find problems before App Store Connect rejects them (`ITMS-91056`).
 - **Fills in Google Play's Data safety form.** Export the form to CSV in Play Console, run `rn-privacy play`
   on it, and import the filled file.
+- **Audits your libraries.** `audit` validates the privacy manifest every library ships, and finds libraries
+  that use required reason APIs without declaring them, with a link to report each problem to the maintainer.
+- **Handles tracking domains.** It collects the `NSPrivacyTrackingDomains` your SDKs declare, and
+  `ios --write --tracking` declares them in your app when you use App Tracking Transparency.
 - **Works with Expo.** In a managed project it updates `expo.ios.privacyManifests` in `app.json`
   (or prints the snippet if you use `app.config.js`).
 
@@ -76,12 +81,50 @@ Sensitive data your app can read
 | Command | What it does |
 | --- | --- |
 | `scan` (default) | Prints required reason APIs, collected data, sensitive device access and warnings. `--format json` for machines. |
-| `ios` | Shows what it would add to your manifest. `--write` saves it. `--include-conditional` also declares data that is only collected in some setups (e.g. after `Sentry.setUser()`). |
+| `ios` | Shows what it would add to your manifest. `--write` saves it. `--include-conditional` also declares data that is only collected in some setups (e.g. after `Sentry.setUser()`). `--tracking` sets `NSPrivacyTracking` and adds your libraries' tracking domains. |
 | `report` | Markdown (or `--format json`) with tables for App Store Connect and Google Play. `-o file.md` to save. |
 | `play <file.csv>` | Fills in the Data safety CSV exported from Play Console. Dry run unless `-o filled.csv`. `--include-conditional` as for `ios`. |
-| `check` | Exit code 1 if a required reason API category is missing from your manifest, or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
+| `check` | `--format json` for CI tools. Exit code 1 if a required reason API category is missing from your manifest, or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
+
+| `audit` | Checks the privacy manifests your libraries ship: invalid files, missing manifests, missing categories, tracking. `--strict` exits with code 1 on a problem. `--format json` for machines. |
 
 All commands accept `--project <dir>` (default: current folder).
+
+### Audit your libraries
+
+```
+$ npx rn-privacy audit
+rn-privacy audit  (18 native libraries, 6 ship a privacy manifest)
+
+✗ Invalid privacy manifest (1)
+  Apple may reject or ignore these files.
+  some-analytics-sdk@2.4.0
+    ios/PrivacyInfo.xcprivacy: "App Name" is not a valid collected data type.
+    Report it: https://github.com/acme/some-analytics-sdk/issues
+
+! Uses required reason APIs without a privacy manifest (1)
+  some-file-library@2.20.0  File timestamps, Disk space
+    found in FileManager.m (NSFileCreationDate), FileManager.m (NSFileSystemSize)
+    Report it: https://github.com/acme/some-file-library/issues
+```
+
+rn-privacy already adds everything these libraries use to **your** app's manifest, so your upload is covered.
+The audit is about the libraries themselves: reporting a problem fixes it for every app that uses them.
+Results come from static analysis, so look at the file before you open an issue.
+
+### Tracking
+
+Some SDKs (attribution, ads) declare tracking and tracking domains in their own privacy manifest. Apple blocks
+connections to tracking domains when the user has not allowed tracking, and expects your app to declare them.
+`rn-privacy scan` lists them. If your app uses App Tracking Transparency:
+
+```bash
+npx rn-privacy ios --write --tracking
+```
+
+This sets `NSPrivacyTracking` to true and adds every tracking domain your libraries declare. rn-privacy never
+turns tracking on without `--tracking`. With the Expo plugin, use `["rn-privacy", { "tracking": true }]`.
+`check` warns when tracking is on but a library's tracking domain is missing.
 
 ### Google Play Data safety
 
@@ -115,22 +158,66 @@ npm install --save-dev rn-privacy
 On every `expo prebuild` (and EAS Build), the plugin scans your dependencies and merges what they need into
 `expo.ios.privacyManifests`. Expo then writes `ios/<App>/PrivacyInfo.xcprivacy` from it. Anything you already
 declared in `privacyManifests` is kept: the plugin only adds. Pass `["rn-privacy", { "includeConditional": true }]`
-to also declare data that is only collected in some setups. Tested with Expo SDK 52, 54 and 58.
+to also declare data that is only collected in some setups, and `{ "tracking": true }` if your app tracks users. Tested with Expo SDK 52, 54 and 58.
 
 With the plugin enabled, `rn-privacy check` knows the manifest is generated and passes in a managed project.
 If you have an `ios` folder, it checks that folder too and tells you to run `expo prebuild` when it is stale.
+
+### EAS Build
+
+Run `check` inside EAS Build, so every iOS build is checked against the files that actually ship. On iOS, EAS runs
+the `eas-build-post-install` hook after `npm install`, `expo prebuild` and `pod install`
+([Expo docs](https://docs.expo.dev/build-reference/npm-hooks/)), so `check` sees the generated `ios` folder and
+the CocoaPods SDKs. Add it to `package.json`:
+
+```json
+{
+  "scripts": {
+    "eas-build-post-install": "[ \"$EAS_BUILD_PLATFORM\" != \"ios\" ] || npx rn-privacy check"
+  }
+}
+```
+
+The guard skips Android builds and local runs (`EAS_BUILD_PLATFORM` is only set inside EAS). If the manifest is
+missing something or is invalid, the iOS build fails with the reason in the build log, before anything is
+uploaded. With the Expo config plugin the manifest is regenerated on every build, so this is a safety net.
+
+### JSON output
+
+`scan`, `report`, `audit` and `check` accept `--format json`. `check --format json` prints the full result and
+keeps the exit code (0 when everything is covered, 1 otherwise):
+
+```json
+{
+  "ok": false,
+  "projectType": "bare",
+  "usesExpoPlugin": false,
+  "requiredApis": [{ "category": "NSPrivacyAccessedAPICategoryDiskSpace", "label": "Disk space", "reasons": ["E174.1"], "packages": ["react-native-fs"] }],
+  "manifests": [{
+    "label": "ios/MyApp/PrivacyInfo.xcprivacy",
+    "status": "missing-apis",
+    "generated": false,
+    "completedByPlugin": false,
+    "missingApis": [{ "category": "NSPrivacyAccessedAPICategoryDiskSpace", "label": "Disk space", "packages": ["react-native-fs"] }],
+    "errors": [], "warnings": [], "undeclaredData": [], "missingTrackingDomains": []
+  }],
+  "hint": "Run `rn-privacy ios --write` to fix."
+}
+```
+
+`status` is one of `ok`, `missing-apis`, `invalid`, `not-generated` or `unreadable`.
 
 ### GitHub Action
 
 ```yaml
 - uses: actions/checkout@v4
 - run: npm ci
-- uses: yogesh2902/rn-privacy@v0.2.0
+- uses: yogesh2902/rn-privacy@v0.3.0
 ```
 
 It runs `rn-privacy check`, fails the job when the manifest is missing something or is invalid, shows each
-problem as an annotation on the pull request, and writes the result and the store privacy answers to the job
-summary.
+problem as an annotation on the pull request, and writes the result, the library audit and the store privacy
+answers to the job summary.
 
 | Input | Default | |
 | --- | --- | --- |

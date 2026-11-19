@@ -40,6 +40,14 @@ if [ "${INPUT_SUMMARY:-true}" = "true" ] && [ -n "${GITHUB_STEP_SUMMARY:-}" ]; t
     echo "$out"
     echo '```'
     echo
+    echo "<details><summary>Library audit: privacy manifests your libraries ship</summary>"
+    echo
+    echo '```'
+    npx --yes --package "$spec" rn-privacy audit 2>/dev/null || echo "Could not run the audit."
+    echo '```'
+    echo
+    echo "</details>"
+    echo
     echo "<details><summary>Store privacy answers (App Store Connect and Google Play)</summary>"
     echo
     npx --yes --package "$spec" rn-privacy report 2>/dev/null || echo "_Could not build the report._"

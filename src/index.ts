@@ -1,5 +1,9 @@
-export { scanProject, scanPackage } from './scanner.js';
-export { analyze, toApiUsages, toCollected } from './analyze.js';
+export { scanProject, scanPackage, issuesUrl } from './scanner.js';
+export { analyze, toApiUsages, toCollected, trackingDomains } from './analyze.js';
+export { audit, auditProblemCount } from './audit.js';
+export { runCheck } from './check.js';
+export type { CheckResult, CheckedManifest, ManifestStatus } from './check.js';
+export type { Audit, LibraryRef } from './audit.js';
 export type { Analysis, ApiFinding, DataFinding, Warning } from './analyze.js';
 export { mergeManifest, readManifest, buildManifest } from './manifest.js';
 export { findIosManifest, findExpoConfig } from './ios.js';

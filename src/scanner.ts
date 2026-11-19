@@ -4,6 +4,7 @@ import { findApiSymbols } from './apis.js';
 import { manifestApis, manifestCollected, readManifest } from './manifest.js';
 import { findRule } from './rules.js';
 import type { ApiCategory, ApiEvidence, PackageReport, ScanResult } from './types.js';
+import { validateManifest } from './validate.js';
 
 const SKIP_DIRS = new Set([
   'node_modules', 'android', 'example', 'examples', 'Example', 'Examples', 'sample', 'samples',
@@ -16,8 +17,46 @@ const MAX_FILE_BYTES = 2 * 1024 * 1024;
 interface PkgJson {
   name?: string;
   version?: string;
+  bugs?: string | { url?: string };
+  repository?: string | { url?: string };
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+}
+
+/** The package's issue tracker: `bugs`, or `<repository>/issues` for GitHub, GitLab and Bitbucket. */
+export function issuesUrl(pkg: PkgJson): string | undefined {
+  const bugs = typeof pkg.bugs === 'string' ? pkg.bugs : pkg.bugs?.url;
+  if (bugs && /^https?:\/\//.test(bugs)) return bugs;
+  let repo = typeof pkg.repository === 'string' ? pkg.repository : pkg.repository?.url;
+  if (!repo) return undefined;
+  repo = repo.replace(/^git\+/, '').replace(/\.git$/, '').replace(/^git:\/\//, 'https://').replace(/^git@([^:]+):/, 'https://$1/');
+  const short = /^(github|gitlab|bitbucket):(.+)$/.exec(repo) ?? (/^[\w.-]+\/[\w.-]+$/.test(repo) ? [repo, 'github', repo] : null);
+  if (short) repo = `https://${short[1]}.${short[1] === 'bitbucket' ? 'org' : 'com'}/${short[2]}`;
+  return /^https:\/\/(github\.com|gitlab\.com|bitbucket\.org)\//.test(repo) ? `${repo}/issues` : undefined;
+}
+
+/** Read one privacy manifest a library ships and record what it declares and what is wrong with it. */
+function readLibraryManifest(report: PackageReport, file: string, rel: string) {
+  const m = readManifest(file);
+  if (!m) {
+    report.manifestIssues.push({ file: rel, level: 'error', message: 'Not a valid property list, so Apple cannot read it.' });
+    return;
+  }
+  report.shipsManifest.push(rel);
+  for (const usage of manifestApis(m)) {
+    let entry = report.apis.get(usage.category);
+    if (!entry) report.apis.set(usage.category, (entry = { reasons: new Set(), evidence: [] }));
+    for (const r of usage.reasons) entry.reasons.add(r);
+    entry.evidence.push({ kind: 'manifest', file: rel });
+  }
+  report.manifestCollected.push(...manifestCollected(m));
+  for (const p of validateManifest(m, { sdk: true })) report.manifestIssues.push({ file: rel, ...p });
+  if (m.NSPrivacyTracking === true) report.declaresTracking = true;
+  if (Array.isArray(m.NSPrivacyTrackingDomains)) {
+    for (const d of m.NSPrivacyTrackingDomains) {
+      if (typeof d === 'string' && d && !report.trackingDomains.includes(d)) report.trackingDomains.push(d);
+    }
+  }
 }
 
 function readJson<T>(file: string): T | null {
@@ -103,6 +142,10 @@ export function scanPackage(name: string, pkgDir: string): PackageReport {
     apis: new Map(),
     manifestCollected: [],
     rule: findRule(name, pkg.version),
+    manifestIssues: [],
+    declaresTracking: false,
+    trackingDomains: [],
+    issuesUrl: issuesUrl(pkg),
   };
   if (!report.hasIosNative) return report;
 
@@ -115,14 +158,7 @@ export function scanPackage(name: string, pkgDir: string): PackageReport {
 
   const files = walk(pkgDir);
   report.hasBinaryFramework = files.binaryFramework;
-  for (const file of files.manifests) {
-    const m = readManifest(file);
-    if (!m) continue;
-    const rel = path.relative(pkgDir, file);
-    report.shipsManifest.push(rel);
-    for (const usage of manifestApis(m)) add(usage.category, usage.reasons, { kind: 'manifest', file: rel });
-    report.manifestCollected.push(...manifestCollected(m));
-  }
+  for (const file of files.manifests) readLibraryManifest(report, file, path.relative(pkgDir, file));
   for (const file of files.sources) {
     let source: string;
     try {
@@ -225,20 +261,11 @@ export function scanPods(projectDir: string): PackageReport[] {
       hasBinaryFramework: false,
       apis: new Map(),
       manifestCollected: [],
+      manifestIssues: [],
+      declaresTracking: false,
+      trackingDomains: [],
     };
-    for (const file of manifests) {
-      const m = readManifest(file);
-      if (!m) continue;
-      const rel = path.relative(podsDir, file);
-      report.shipsManifest.push(rel);
-      for (const usage of manifestApis(m)) {
-        let entry = report.apis.get(usage.category);
-        if (!entry) report.apis.set(usage.category, (entry = { reasons: new Set(), evidence: [] }));
-        for (const r of usage.reasons) entry.reasons.add(r);
-        entry.evidence.push({ kind: 'manifest', file: rel });
-      }
-      report.manifestCollected.push(...manifestCollected(m));
-    }
+    for (const file of manifests) readLibraryManifest(report, file, path.relative(podsDir, file));
     reports.push(report);
   }
   return reports;
