@@ -21,11 +21,23 @@ inputs:
   annotations:
     description: Show problems as error and warning annotations on the pull request.
     default: 'true'
+  comment:
+    description: "On pull requests, post the result as a comment, updated on every push. Needs the pull-requests: write permission."
+    default: 'true'
+  github-token:
+    description: Token used to comment on the pull request.
+    default: ${{ github.token }}
 
 outputs:
   result:
     description: pass or fail
     value: ${{ steps.check.outputs.result }}
+  privacy-changes:
+    description: true when the dependencies changed what must be declared since privacy-snapshot.json
+    value: ${{ steps.check.outputs.privacy-changes }}
+  comment-id:
+    description: ID of the pull request comment, when one was posted or updated
+    value: ${{ steps.check.outputs.comment-id }}
 
 runs:
   using: composite
@@ -38,4 +50,9 @@ runs:
         INPUT_FAIL: ${{ inputs.fail-on-error }}
         INPUT_SUMMARY: ${{ inputs.summary }}
         INPUT_ANNOTATIONS: ${{ inputs.annotations }}
+        INPUT_COMMENT: ${{ inputs.comment }}
+        INPUT_PROJECT_LABEL: ${{ inputs.project-path }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        REPO: ${{ github.repository }}
       run: bash "$GITHUB_ACTION_PATH/action/run.sh"

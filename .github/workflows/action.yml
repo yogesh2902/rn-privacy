@@ -6,6 +6,9 @@ on:
 jobs:
   action:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # for the PR comment test below
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -34,6 +37,7 @@ jobs:
           fail-on-error: 'false'
           summary: 'false'
           annotations: 'false'
+          comment: 'false'
 
       - name: App with an invalid reason
         id: invalid
@@ -44,6 +48,34 @@ jobs:
           fail-on-error: 'false'
           summary: 'false'
           annotations: 'false'
+          comment: 'false'
+
+      # A real pull request comment: posted, read back, then deleted so it leaves no clutter.
+      # Pull requests from forks get a read-only token, so this only runs for branches of this repo.
+      - name: PR comment
+        id: comment
+        if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        uses: ./
+        with:
+          project-path: ${{ runner.temp }}/missing
+          version: ${{ env.TARBALL }}
+          fail-on-error: 'false'
+          summary: 'false'
+          annotations: 'false'
+
+      - name: Check and delete the test comment
+        if: steps.comment.outcome == 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ID: ${{ steps.comment.outputs.comment-id }}
+          REPO: ${{ github.repository }}
+        run: |
+          test -n "$ID" || { echo "::error::No comment was posted"; exit 1; }
+          body="$(gh api "repos/$REPO/issues/comments/$ID" --jq .body)"
+          echo "$body"
+          echo "$body" | grep -q "rn-privacy: privacy manifest needs attention"
+          echo "$body" | grep -q "Missing required reason API: Disk space"
+          gh api -X DELETE "repos/$REPO/issues/comments/$ID"
 
       - name: Check results
         env:
