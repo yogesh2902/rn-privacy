@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import type { ApiCategory } from './types.js';
+import { findPurposeUsesInBinary } from './purpose.js';
 
 /**
  * Required reason APIs in prebuilt binaries (.framework, .xcframework, .a).
@@ -69,6 +70,11 @@ export interface BinaryHit {
 
 /** Required reason API symbols in one binary. Returns null when the file is too large to read. */
 export function scanBinary(file: string): BinaryHit[] | null {
+  return scanBinaryFull(file)?.apis ?? null;
+}
+
+/** Required reason APIs and the permission requests (purpose strings) in one binary, reading it once. */
+export function scanBinaryFull(file: string): { apis: BinaryHit[]; purposes: { key: string; symbol: string }[] } | null {
   const size = fs.statSync(file).size;
   if (size > MAX_BINARY_BYTES) return null;
   const data = fs.readFileSync(file);
@@ -77,7 +83,7 @@ export function scanBinary(file: string): BinaryHit[] | null {
     if (hits.some((h) => h.category === p.category)) continue;
     if (data.indexOf(p.bytes) !== -1) hits.push({ category: p.category, symbol: p.name });
   }
-  return hits;
+  return { apis: hits, purposes: findPurposeUsesInBinary(data) };
 }
 
 /** Slices that never ship in an iOS app build (when an iOS device slice exists, that is enough). */

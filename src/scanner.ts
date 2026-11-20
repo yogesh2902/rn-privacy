@@ -3,10 +3,12 @@ import path from 'node:path';
 import { findApiSymbols } from './apis.js';
 import { manifestApis, manifestCollected, readManifest } from './manifest.js';
 import { findRule } from './rules.js';
-import type { ApiCategory, ApiEvidence, PackageReport, ScanResult } from './types.js';
+import type { ApiCategory, ApiEvidence, ExtensionReport, PackageReport, ScanResult } from './types.js';
 import { validateManifest } from './validate.js';
 import { libraryManifestPath, readAndroidManifest, readAppAndroid } from './android.js';
-import { isAppleBinary, scanBinary, SKIP_SLICE } from './binary.js';
+import { isAppleBinary, scanBinaryFull, SKIP_SLICE } from './binary.js';
+import { findPurposeUses, podfilePermissions } from './purpose.js';
+import plist from 'plist';
 import { loadConfig } from './config.js';
 import { findSwiftPackages, packageDirs } from './spm.js';
 import type { LibraryRule } from './types.js';
@@ -26,6 +28,7 @@ interface PkgJson {
   repository?: string | { url?: string };
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  expo?: { autolinking?: { nativeModulesDir?: string } };
 }
 
 /** The nearest file or folder with this name in dir or a parent folder (monorepos keep it at the root). */
@@ -176,6 +179,7 @@ export function scanPackage(name: string, pkgDir: string, customRules: LibraryRu
     issuesUrl: issuesUrl(pkg),
     androidPermissions: readAndroidManifest(libraryManifestPath(pkgDir))?.uses ?? [],
     unscannedBinaries: [],
+    purposeUses: new Map(),
   };
   if (!report.hasIosNative) return report;
   scanNative(report, walk(pkgDir), pkgDir);
@@ -183,7 +187,7 @@ export function scanPackage(name: string, pkgDir: string, customRules: LibraryRu
 }
 
 /** Read the manifests, scan the sources and the prebuilt binaries of one native package. */
-function scanNative(report: PackageReport, files: WalkResult, baseDir: string) {
+function scanNative(report: PackageReport, files: WalkResult, baseDir: string, opts: { manifests?: boolean } = {}) {
   const add = (category: ApiCategory, reasons: string[], evidence: ApiEvidence) => {
     let entry = report.apis.get(category);
     if (!entry) report.apis.set(category, (entry = { reasons: new Set(), evidence: [] }));
@@ -192,7 +196,8 @@ function scanNative(report: PackageReport, files: WalkResult, baseDir: string) {
   };
 
   report.hasBinaryFramework ||= files.binaryFramework;
-  for (const file of files.manifests) readLibraryManifest(report, file, path.relative(baseDir, file));
+  // The app's own manifest is what rn-privacy checks, so it is not read as a library manifest.
+  if (opts.manifests !== false) for (const file of files.manifests) readLibraryManifest(report, file, path.relative(baseDir, file));
   for (const file of files.sources) {
     let source: string;
     try {
@@ -207,8 +212,15 @@ function scanNative(report: PackageReport, files: WalkResult, baseDir: string) {
       if (entry && entry.evidence.filter((e) => e.kind === 'source').length >= 3) continue;
       add(hit.category, [], { kind: 'source', file: path.relative(baseDir, file), symbol: hit.symbol });
     }
+    for (const hit of findPurposeUses(source)) addPurpose(report, hit.key, { kind: 'source', file: path.relative(baseDir, file), symbol: hit.symbol });
   }
   scanBinaries(report, files.binaries, baseDir);
+}
+
+function addPurpose(report: { purposeUses: Map<string, ApiEvidence[]> }, key: string, evidence: ApiEvidence) {
+  const list = report.purposeUses.get(key) ?? [];
+  if (list.length < 3) list.push(evidence);
+  report.purposeUses.set(key, list);
 }
 
 /** Add required reason APIs found in prebuilt binaries. */
@@ -216,12 +228,13 @@ function scanBinaries(report: PackageReport, files: string[], baseDir: string) {
   for (const file of files) {
     if (!isAppleBinary(file)) continue;
     const rel = path.relative(baseDir, file);
-    const hits = scanBinary(file);
-    if (!hits) {
+    const result = scanBinaryFull(file);
+    if (!result) {
       report.unscannedBinaries.push(rel);
       continue;
     }
-    for (const hit of hits) {
+    for (const hit of result.purposes) addPurpose(report, hit.key, { kind: 'binary', file: rel, symbol: hit.symbol });
+    for (const hit of result.apis) {
       let entry = report.apis.get(hit.category);
       if (!entry) report.apis.set(hit.category, (entry = { reasons: new Set(), evidence: [] }));
       if (entry.evidence.filter((e) => e.kind === 'binary').length < 3) entry.evidence.push({ kind: 'binary', file: rel, symbol: hit.symbol });
@@ -254,6 +267,7 @@ export function scanProject(projectDir: string): ScanResult {
     configFile: config?.file,
     unusedRules: [],
     swiftPackagesNotDownloaded: [],
+    extensions: [],
     projectType: detectProjectType(projectDir, pkg),
     packages: [],
     missingPackages: [],
@@ -293,6 +307,12 @@ export function scanProject(projectDir: string): ScanResult {
   const swift = scanSwiftPackages(projectDir, custom);
   result.packages.push(...swift.reports);
   result.swiftPackagesNotDownloaded = swift.notDownloaded;
+
+  result.packages.push(...scanLocalModules(projectDir, pkg, custom));
+  const native = scanAppNative(projectDir, result.packages);
+  if (native.app) result.packages.push(native.app);
+  result.extensions = native.extensions;
+  limitPermissionHandlers(projectDir, result.packages);
 
   // Rules without packages describe what the app itself collects.
   for (const rule of custom.filter((r) => !r.packages.length)) result.packages.push(appReport(rule));
@@ -339,6 +359,7 @@ export function scanPods(projectDir: string, customRules: LibraryRule[] = []): P
       trackingDomains: [],
       androidPermissions: [],
       unscannedBinaries: [],
+      purposeUses: new Map(),
       iosOnly: true,
     };
     for (const file of manifests) readLibraryManifest(report, file, path.relative(podsDir, file));
@@ -366,6 +387,7 @@ function appReport(rule: LibraryRule): PackageReport {
     trackingDomains: [],
     androidPermissions: [],
     unscannedBinaries: [],
+    purposeUses: new Map(),
   };
 }
 
@@ -396,6 +418,7 @@ export function scanSwiftPackages(projectDir: string, customRules: LibraryRule[]
       issuesUrl: pkg.location ? issuesUrl({ repository: pkg.location }) : undefined,
       androidPermissions: [],
       unscannedBinaries: [],
+      purposeUses: new Map(),
       iosOnly: true,
     };
     if (!dirs.length) {
@@ -409,4 +432,160 @@ export function scanSwiftPackages(projectDir: string, customRules: LibraryRule[]
     reports.push(report);
   }
   return { reports, notDownloaded };
+}
+
+// ------------------------------------------------- the app's own native code
+
+const IOS_SKIP = new Set(['Pods', 'build', 'DerivedData', 'SourcePackages', 'fastlane', 'vendor']);
+
+function readPlist(file: string): Record<string, unknown> | null {
+  try {
+    const v = plist.parse(fs.readFileSync(file, 'utf8'));
+    return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Podfile `target 'Name' do ... end` blocks and the pods inside each one. */
+export function podfileTargets(podfile: string): Map<string, string[]> {
+  const targets = new Map<string, string[]>();
+  const stack: { name: string | null }[] = [];
+  for (const raw of podfile.split('\n')) {
+    const line = raw.replace(/#.*$/, '').trim();
+    const t = /^(?:abstract_)?target\s+['"]([^'"]+)['"]\s+do\b/.exec(line);
+    if (t) {
+      stack.push({ name: t[1] });
+      if (!targets.has(t[1])) targets.set(t[1], []);
+      continue;
+    }
+    if (/\bdo\b(\s*\|[^|]*\|)?\s*$/.test(line)) { stack.push({ name: null }); continue; }
+    if (/^end\b/.test(line)) { stack.pop(); continue; }
+    const pod = /^pod\s+['"]([^'"/]+)/.exec(line);
+    const current = [...stack].reverse().find((x) => x.name);
+    if (pod && current?.name) targets.get(current.name)!.push(pod[1]);
+  }
+  return targets;
+}
+
+/**
+ * Code in ios/ that belongs to the app itself (custom native modules, AppDelegate...), and the app
+ * extensions (notification service, widgets...), which are bundles with their own manifest.
+ */
+export function scanAppNative(projectDir: string, packages: PackageReport[]): { app: PackageReport | null; extensions: ExtensionReport[] } {
+  const iosDir = path.join(projectDir, 'ios');
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(iosDir, { withFileTypes: true });
+  } catch {
+    return { app: null, extensions: [] };
+  }
+  let podfile = '';
+  try { podfile = fs.readFileSync(path.join(iosDir, 'Podfile'), 'utf8'); } catch { /* no Podfile */ }
+  const targets = podfileTargets(podfile);
+  const app: PackageReport = {
+    name: 'your app (ios)',
+    version: '-',
+    dir: projectDir,
+    hasIosNative: true,
+    shipsManifest: [],
+    hasBinaryFramework: false,
+    apis: new Map(),
+    manifestCollected: [],
+    manifestIssues: [],
+    declaresTracking: false,
+    trackingDomains: [],
+    androidPermissions: [],
+    unscannedBinaries: [],
+    purposeUses: new Map(),
+    iosOnly: true,
+    origin: 'app-code',
+  };
+  const extensions: ExtensionReport[] = [];
+  for (const e of entries) {
+    if (!e.isDirectory() || IOS_SKIP.has(e.name) || /\.(xcodeproj|xcworkspace)$/.test(e.name) || /Tests$/.test(e.name)) continue;
+    const dir = path.join(iosDir, e.name);
+    const info = readPlist(path.join(dir, 'Info.plist'));
+    const files = walk(dir);
+    const ext = info?.NSExtension as { NSExtensionPointIdentifier?: string } | undefined;
+    if (!ext) {
+      scanNative(app, files, projectDir, { manifests: false });
+      continue;
+    }
+    const report: PackageReport = { ...app, name: e.name, apis: new Map(), purposeUses: new Map(), unscannedBinaries: [] };
+    scanNative(report, files, projectDir, { manifests: false });
+    const apis: ExtensionReport['apis'] = new Map();
+    const addApi = (cat: ApiCategory, ev: ApiEvidence[], pkg: string) => {
+      let entry = apis.get(cat);
+      if (!entry) apis.set(cat, (entry = { reasons: new Set(), evidence: [], packages: new Set() }));
+      entry.evidence.push(...ev.slice(0, 3 - entry.evidence.length));
+      entry.packages.add(pkg);
+    };
+    for (const [cat, v] of report.apis) addApi(cat, v.evidence, `ios/${e.name}`);
+    // Pods only this extension uses are linked into it. Those with their own manifest declare themselves.
+    const pods = targets.get(e.name) ?? [];
+    for (const pod of pods) {
+      const pr = packages.find((p) => p.name === `${pod} (CocoaPods)`);
+      if (!pr || pr.shipsManifest.length) continue;
+      for (const [cat, v] of pr.apis) addApi(cat, v.evidence, pr.name);
+    }
+    const manifest = path.join(dir, 'PrivacyInfo.xcprivacy');
+    extensions.push({
+      name: e.name,
+      dir: path.relative(projectDir, dir),
+      kind: ext.NSExtensionPointIdentifier,
+      apis,
+      purposeUses: report.purposeUses,
+      manifest: fs.existsSync(manifest) ? manifest : null,
+      infoPlist: path.join(dir, 'Info.plist'),
+      pods,
+    });
+  }
+  return { app: app.apis.size || app.purposeUses.size ? app : null, extensions };
+}
+
+/** Expo local modules (modules/<name> with expo-module.config.json): linked into the app, but not in package.json. */
+export function scanLocalModules(projectDir: string, pkg: { expo?: { autolinking?: { nativeModulesDir?: string } } }, customRules: LibraryRule[] = []): PackageReport[] {
+  const base = path.resolve(projectDir, pkg.expo?.autolinking?.nativeModulesDir ?? 'modules');
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(base, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  const out: PackageReport[] = [];
+  for (const e of entries) {
+    const dir = path.join(base, e.name);
+    if (!e.isDirectory() || !fs.existsSync(path.join(dir, 'expo-module.config.json'))) continue;
+    const name = `${path.relative(projectDir, dir).split(path.sep).join('/')} (local module)`;
+    const report = scanPackage(name, dir, customRules);
+    report.origin = 'local-module';
+    report.rule = ruleFor(path.relative(projectDir, dir).split(path.sep).join('/'), undefined, customRules, false) ?? ruleFor(e.name, undefined, customRules, false);
+    out.push(report);
+  }
+  return out;
+}
+
+/**
+ * react-native-permissions only compiles the permission handlers you enable (setup_permissions in the
+ * Podfile, or iosPermissions in its Expo plugin), so only those count.
+ */
+function limitPermissionHandlers(projectDir: string, packages: PackageReport[]) {
+  const rnp = packages.find((p) => p.name === 'react-native-permissions');
+  if (!rnp) return;
+  let enabled: Set<string> | null = null;
+  try { enabled = podfilePermissions(fs.readFileSync(path.join(projectDir, 'ios', 'Podfile'), 'utf8')); } catch { /* no Podfile */ }
+  if (!enabled) {
+    try {
+      const json = JSON.parse(fs.readFileSync(path.join(projectDir, 'app.json'), 'utf8'));
+      const entry = ((json.expo ?? json).plugins ?? []).find((p: unknown) => Array.isArray(p) && p[0] === 'react-native-permissions');
+      if (entry && Array.isArray(entry[1]?.iosPermissions)) enabled = new Set(entry[1].iosPermissions);
+    } catch { /* no app.json */ }
+  }
+  const allowed = enabled ?? new Set<string>();
+  for (const [key, evidence] of rnp.purposeUses) {
+    const kept = evidence.filter((ev) => ev.file.split(/[\\/]/).some((part) => allowed.has(part)));
+    if (kept.length) rnp.purposeUses.set(key, kept);
+    else rnp.purposeUses.delete(key);
+  }
 }

@@ -18,7 +18,8 @@ npx rn-privacy report -o store-privacy.md  # answers for both store forms
 npx rn-privacy report -f appstore  # App Store Connect's App Privacy form, step by step
 npx rn-privacy report -f inventory  # what is collected, by whom and why, for your privacy policy
 npx rn-privacy play data_safety.csv -o filled.csv  # fill Google Play's Data safety CSV
-npx rn-privacy check      # for CI: fails if the manifest is missing something or invalid
+npx rn-privacy check      # for CI: fails if the manifest or a permission text is missing, or invalid
+npx rn-privacy why "Disk space"  # which library, file and symbol is behind an entry
 npx rn-privacy audit      # problems in the privacy manifests your libraries ship
 npx rn-privacy diff       # privacy changes since your committed privacy-snapshot.json
 ```
@@ -36,8 +37,13 @@ npx rn-privacy diff       # privacy changes since your committed privacy-snapsho
 - **Finds Apple "required reason" APIs** (User defaults, File timestamps, System boot time, Disk space,
   Active keyboards) by scanning the iOS source code of every native dependency, the prebuilt binaries
   (`.xcframework`, `.framework`, `.a`) closed-source SDKs ship, and the privacy manifests libraries include.
-  Missing these gets your upload rejected (`ITMS-91053`).
-- **Knows what popular SDKs collect** (Firebase, Sentry, AdMob, Meta, Mixpanel, Amplitude, PostHog,
+  Missing these gets your upload rejected (`ITMS-91053`). Your own native code, Expo local modules and app
+  extensions (notification service, widgets) are scanned too.
+- **Catches missing permission texts.** When code asks for the camera, location, contacts, Bluetooth, tracking
+  and more, `Info.plist` needs a purpose string such as `NSCameraUsageDescription` (`ITMS-90683`). `check`
+  finds which library asks, and whether `Info.plist` or `app.json` has the text.
+- **Explains every entry.** `rn-privacy why "Disk space"` shows the library, file and symbol behind it.
+- **Knows what popular SDKs collect** (Firebase, Stripe, Google Maps, Google Sign-In, Sentry, AdMob, Meta, Mixpanel, Amplitude, PostHog,
   Segment, RevenueCat, OneSignal, AppsFlyer, Branch, Adjust, Singular, CleverTap, MoEngage, Braze, Klaviyo,
   Intercom, Luciq/Instabug, LogRocket, Microsoft Clarity, BugSnag, Datadog...) and maps it to both Apple's
   and Google's categories. Rules come from each vendor's own privacy manifest or documentation.
@@ -98,12 +104,61 @@ Sensitive data your app can read
 | `ios` | Shows what it would add to your manifest. `--write` saves it. `--include-conditional` also declares data that is only collected in some setups (e.g. after `Sentry.setUser()`). `--tracking` sets `NSPrivacyTracking` and adds your libraries' tracking domains. |
 | `report` | Markdown (or `--format json`) with tables for App Store Connect and Google Play. `--format appstore`: the App Privacy answers in the order App Store Connect asks for them. `--format inventory`: the data, services and purposes for your privacy policy. `-o file.md` to save. |
 | `play <file.csv>` | Fills in the Data safety CSV exported from Play Console. Dry run unless `-o filled.csv`. `--include-conditional` as for `ios`. |
-| `check` | `--format json` for CI tools. Exit code 1 if a required reason API category is missing from your manifest, or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
+| `check` | `--format json` for CI tools. Exit code 1 if a required reason API category is missing from your manifest or an app extension's, if `Info.plist` lacks a purpose string your code needs (ITMS-90683), or if the manifest is invalid (unknown reason codes, SDK-only reasons, wrong value types). Warns about undeclared data. In an Expo project with an `ios` folder, it checks both `app.json` and the generated `PrivacyInfo.xcprivacy`, so a stale prebuild is caught too. |
 | `audit` | Checks the privacy manifests your libraries ship: invalid files, missing manifests, missing categories, tracking. `--suggest` writes a fixed manifest and an issue text for each library. `--strict` exits with code 1 on a problem. `--format json` for machines. |
 | `snapshot` | Writes `privacy-snapshot.json`: required reason APIs, collected data, tracking domains, Android permissions and native library versions. Commit it. |
+| `why <thing>` | Where an entry comes from: a required reason API (`"Disk space"`), an `Info.plist` key (`NSCameraUsageDescription`), a data type (`"Device ID"`), an Android permission (`CAMERA`), a tracking domain or a package. Shows each library with the file and symbol, or the rule and its sources. `--format json`. |
 | `diff` | Privacy changes since the snapshot. `--base origin/main` compares with the snapshot on another branch. `--strict` exits with code 1 on a change. `--format json`. |
 
 All commands accept `--project <dir>` (default: current folder).
+
+### Permission texts in Info.plist (ITMS-90683)
+
+When your app's code asks for access to the camera, microphone, photo library, location, contacts, calendars,
+Bluetooth, motion, speech recognition, the media library, Health, Siri, NFC or tracking, `Info.plist` must
+explain why with a purpose string such as `NSCameraUsageDescription`. Without it App Store Connect rejects the
+upload (`ITMS-90683`), and iOS ends the app when the prompt would appear. A library can need one even if your
+app never uses that feature.
+
+rn-privacy looks for the calls that ask for access (they show the permission prompt), in source code and in
+prebuilt binaries, not for any mention of a framework. `check` then reads:
+
+- **Bare and Expo prebuild projects:** `ios/<App>/Info.plist`, which is what ships. An empty string fails too.
+- **Expo managed projects:** `expo.ios.infoPlist` in `app.json`. Config plugins that add a default text count:
+  Expo applies those of `expo-camera`, `expo-image-picker`, `expo-media-library`, `expo-location`,
+  `expo-contacts`, `expo-calendar`, `expo-av`, `expo-sensors` and `expo-local-authentication` whenever they are
+  installed; others (such as `expo-tracking-transparency`, or a library's own plugin) when listed in `plugins`.
+- **react-native-permissions:** only the handlers you enable with `setup_permissions` in the Podfile (or
+  `iosPermissions` in its Expo plugin) count, because only those are compiled.
+
+`NSFaceIDUsageDescription` is a warning: it does not block the upload, but Face ID fails without it.
+`rn-privacy why NSCameraUsageDescription` shows which code asks for it.
+
+### Your app's own code, Expo local modules and app extensions
+
+- **Your code in `ios/`** (custom native modules, AppDelegate) is scanned like a library, as "your app (ios)".
+- **Expo local modules** in `modules/` (or `expo.autolinking.nativeModulesDir`) are linked into the app but are
+  not in `package.json`; they are scanned too.
+- **App extensions** (any `ios/<Name>/` whose `Info.plist` has `NSExtension`: notification service extensions,
+  widgets, share extensions) are separate bundles, so each needs **its own** privacy manifest and `Info.plist`
+  strings. `check` lists what each extension uses, including pods the Podfile adds only to that target that
+  ship no manifest of their own, and `ios --write` creates or updates `ios/<Name>/PrivacyInfo.xcprivacy`.
+  Add the new file to the extension's target in Xcode.
+
+### Where does this come from? `why`
+
+```
+$ npx rn-privacy why "Disk space"
+Disk space (NSPrivacyAccessedAPICategoryDiskSpace): required reason API
+  @react-native-async-storage/async-storage@3.1.1
+    prebuilt binary node_modules/@react-native-async-storage/async-storage/apple-frameworks/.../SharedAsyncStorage: statfs
+  react-native-fs@2.20.0
+    code node_modules/react-native-fs/RNFSManager.m: NSFileSystemSize
+  Your app manifest needs it with the reasons 85F4.1.
+```
+
+It also takes an `Info.plist` key, a data type (`"Device ID"`, with the rule or manifest it comes from), an Android
+permission, a tracking domain, or a package name (everything rn-privacy knows about that package).
 
 ### Audit your libraries
 
@@ -388,7 +443,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: npm ci
-      - uses: yogesh2902/rn-privacy@v0.4.0
+      - uses: yogesh2902/rn-privacy@v0.5.0
 ```
 
 It runs `rn-privacy check`, fails the job when the manifest is missing something or is invalid, and shows each
@@ -464,6 +519,9 @@ into your app's manifest.
 - Prebuilt binaries are searched for the exact names of the required reason APIs. Binaries over 300 MB are
   skipped with a warning. Static analysis can miss dynamic calls or report code that never runs.
 - Android permissions added by Gradle dependencies only appear after you build the Android app once.
+- Permission texts are found from the calls that ask for access. A library can ask in a way rn-privacy does not
+  recognize, and in an Expo managed project the final `Info.plist` only exists after prebuild: run `check` after
+  `npx expo prebuild` for an exact answer.
 
 ## Contributing rules
 

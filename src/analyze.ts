@@ -3,6 +3,7 @@ import type { ApiCategory, ApiUsage, CollectedData, DataType, PackageReport, Pla
 import { APPLE_TO_PLAY_PURPOSE } from './types.js';
 import { SDK_ONLY_REASONS } from './validate.js';
 import { SENSITIVE_PERMISSIONS } from './android.js';
+import { PURPOSE_KEY_NAMES } from './purpose.js';
 
 export interface ApiFinding {
   category: ApiCategory;
@@ -40,6 +41,8 @@ export interface Analysis {
   android: AndroidFinding[];
   /** Data collected, in Google Play's terms (from vendors' Play disclosures where they exist). */
   play: PlayFinding[];
+  /** Info.plist purpose strings the app needs, because its code or a library asks for that access. */
+  purposes: { key: string; packages: string[] }[];
 }
 
 export interface PlayFinding {
@@ -242,8 +245,15 @@ export function analyze(scan: ScanResult): Analysis {
     }
   }
 
+  const purposeMap = new Map<string, string[]>();
+  for (const pkg of scan.packages) {
+    for (const key of pkg.purposeUses?.keys() ?? []) purposeMap.set(key, [...(purposeMap.get(key) ?? []), pkg.name]);
+  }
+  const purposes = PURPOSE_KEY_NAMES.filter((k) => purposeMap.has(k)).map((key) => ({ key, packages: purposeMap.get(key)! }));
+
   return {
     apis,
+    purposes,
     data,
     access: [...accessMap.entries()].map(([type, packages]) => ({ type, packages })),
     warnings,

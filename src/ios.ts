@@ -20,17 +20,30 @@ export function findIosManifest(projectDir: string): IosTarget | null {
   const pbxproj = xcodeproj ? path.join(iosDir, xcodeproj.name, 'project.pbxproj') : null;
   const referenced = pbxproj && fs.existsSync(pbxproj) ? fs.readFileSync(pbxproj, 'utf8').includes('PrivacyInfo.xcprivacy') : null;
 
-  for (const e of entries) {
-    if (!e.isDirectory() || ['Pods', 'build'].includes(e.name) || e.name.endsWith('.xcodeproj') || e.name.endsWith('.xcworkspace')) continue;
+  const appName = xcodeproj?.name.replace(/\.xcodeproj$/, '');
+  // The app's own folder first (named after the Xcode project); never an app extension's folder.
+  const dirs = entries
+    .filter((e) => e.isDirectory() && !['Pods', 'build'].includes(e.name) && !e.name.endsWith('.xcodeproj') && !e.name.endsWith('.xcworkspace'))
+    .filter((e) => !isExtensionDir(path.join(iosDir, e.name)))
+    .sort((a, b) => Number(b.name === appName) - Number(a.name === appName));
+  for (const e of dirs) {
     const candidate = path.join(iosDir, e.name, 'PrivacyInfo.xcprivacy');
     if (fs.existsSync(candidate)) return { file: candidate, exists: true, inXcodeProject: referenced };
   }
   const rootCandidate = path.join(iosDir, 'PrivacyInfo.xcprivacy');
   if (fs.existsSync(rootCandidate)) return { file: rootCandidate, exists: true, inXcodeProject: referenced };
 
-  const appName = xcodeproj?.name.replace(/\.xcodeproj$/, '');
   const appDir = appName && fs.existsSync(path.join(iosDir, appName)) ? path.join(iosDir, appName) : iosDir;
   return { file: path.join(appDir, 'PrivacyInfo.xcprivacy'), exists: false, inXcodeProject: false };
+}
+
+/** An app extension's folder: its Info.plist has NSExtension. */
+function isExtensionDir(dir: string): boolean {
+  try {
+    return /<key>\s*NSExtension\s*<\/key>/.test(fs.readFileSync(path.join(dir, 'Info.plist'), 'utf8'));
+  } catch {
+    return false;
+  }
 }
 
 export function planIosManifest(target: IosTarget, apis: ApiUsage[], collected: CollectedData[], opts: MergeOptions = {}) {
