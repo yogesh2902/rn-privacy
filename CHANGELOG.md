@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0
+- **Permission texts (`ITMS-90683`):** rn-privacy finds the calls that ask for the camera, microphone, photo
+  library, location, contacts, calendars, reminders, Bluetooth, motion, speech recognition, media library, Health,
+  Siri, NFC, Face ID and tracking, in source code and prebuilt binaries. `check` fails when `Info.plist` (or
+  `expo.ios.infoPlist`) lacks the purpose string or it is empty. In Expo, the config plugins that add default
+  texts count (verified against Expo's prebuild code). react-native-permissions only counts the handlers enabled
+  in `setup_permissions`. `scan`, `report`, JSON and the snapshot list them, and `diff` shows new ones.
+- **Your own native code, Expo local modules and app extensions** are scanned. Extensions (notification service,
+  widgets...) are checked against their own manifest and `Info.plist`, including pods only they use, and
+  `ios --write` creates their manifests.
+- **`rn-privacy why <thing>`:** which library, file and symbol (or which rule and its sources) is behind a
+  required reason API, a purpose string, a data type, an Android permission, a tracking domain or a package.
+- **10 more SDK rules**, each from the vendor's own pages: Cloud Firestore, Remote Config, App Check, In-App
+  Messaging, Cloud Storage, Realtime Database and Cloud Functions (Google's Firebase disclosures for both stores),
+  Stripe (its privacy manifests and privacy page), Google Maps via react-native-maps (Google's manifest and Play
+  disclosure; iOS data only with the Google provider) and Google Sign-In (its privacy manifest).
+- Fix: in a project with app extensions, the app's own manifest could be mistaken for an extension's.
+
 ## 0.4.0
 - **10 more SDK rules**, each from the vendor's own source: CleverTap, Braze, Klaviyo, Adjust, Singular and
   Intercom (from the privacy manifests they publish), MoEngage (manifests and docs), Microsoft Clarity,

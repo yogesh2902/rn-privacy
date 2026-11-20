@@ -171,6 +171,101 @@
           "UserID (AppFunctionality, linked)"
         ]
       }
+    },
+    "https://github.com/stripe/stripe-ios/blob/master/StripeCore/StripeCore/PrivacyInfo.xcprivacy": {
+      "rule": "Stripe",
+      "source": "https://github.com/stripe/stripe-ios/blob/master/StripeCore/StripeCore/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "ProductInteraction (Analytics+AppFunctionality, linked)"
+        ]
+      }
+    },
+    "https://github.com/stripe/stripe-ios/blob/master/StripePaymentSheet/StripePaymentSheet/PrivacyInfo.xcprivacy": {
+      "rule": "Stripe",
+      "source": "https://github.com/stripe/stripe-ios/blob/master/StripePaymentSheet/StripePaymentSheet/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "PaymentInfo (AppFunctionality, linked)",
+          "ProductInteraction (Analytics+AppFunctionality, linked)"
+        ]
+      }
+    },
+    "react-native-maps/ios/AirGoogleMaps/Resources/GoogleMapsPrivacy.bundle/PrivacyInfo.xcprivacy": {
+      "rule": "Google Maps SDK (react-native-maps)",
+      "source": "npm:react-native-maps",
+      "version": "1.29.11",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "CrashData (Analytics)",
+          "DeviceID (Analytics+AppFunctionality)",
+          "PerformanceData (Analytics)",
+          "ProductInteraction (Analytics)",
+          "UserID (Analytics, linked)"
+        ]
+      }
+    },
+    "react-native-maps/ios/PrivacyInfo.xcprivacy": {
+      "rule": "Google Maps SDK (react-native-maps)",
+      "source": "npm:react-native-maps",
+      "version": "1.29.11",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "PreciseLocation (AppFunctionality)"
+        ]
+      }
+    },
+    "https://github.com/react-native-maps/react-native-maps/blob/master/ios/PrivacyInfo.xcprivacy": {
+      "rule": "Google Maps SDK (react-native-maps)",
+      "source": "https://github.com/react-native-maps/react-native-maps/blob/master/ios/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "PreciseLocation (AppFunctionality)"
+        ]
+      }
+    },
+    "https://github.com/googlemaps/ios-maps-sdk/blob/main/Maps/Resources/GoogleMapsResources/GoogleMaps.bundle/PrivacyInfo.xcprivacy": {
+      "rule": "Google Maps SDK (react-native-maps)",
+      "source": "https://github.com/googlemaps/ios-maps-sdk/blob/main/Maps/Resources/GoogleMapsResources/GoogleMaps.bundle/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "CrashData (Analytics)",
+          "DeviceID (Analytics+AppFunctionality, linked)",
+          "OtherDataTypes (Analytics, linked)",
+          "PerformanceData (Analytics)",
+          "ProductInteraction (Analytics)"
+        ]
+      }
+    },
+    "https://github.com/google/GoogleSignIn-iOS/blob/main/GoogleSignIn/Sources/Resources/PrivacyInfo.xcprivacy": {
+      "rule": "Google Sign-In",
+      "source": "https://github.com/google/GoogleSignIn-iOS/blob/main/GoogleSignIn/Sources/Resources/PrivacyInfo.xcprivacy",
+      "summary": {
+        "tracking": false,
+        "domains": [],
+        "collected": [
+          "CoarseLocation (AppFunctionality, linked)",
+          "DeviceID (Analytics, linked)",
+          "EmailAddress (AppFunctionality, linked)",
+          "Name (AppFunctionality, linked)",
+          "OtherDataTypes (Analytics+AppFunctionality, linked)",
+          "OtherUsageData (Analytics, linked)",
+          "PhoneNumber (AppFunctionality, linked)",
+          "UserID (Analytics+AppFunctionality, linked)"
+        ]
+      }
     }
   },
   "versions": {
@@ -179,14 +274,21 @@
     "@react-native-firebase/messaging": "27.1.1",
     "@react-native-firebase/perf": "27.1.1",
     "@react-native-firebase/auth": "27.1.1",
+    "@react-native-firebase/firestore": "27.1.1",
+    "@react-native-firebase/remote-config": "27.1.1",
+    "@react-native-firebase/app-check": "27.1.1",
+    "@react-native-firebase/in-app-messaging": "27.1.1",
+    "@react-native-firebase/storage": "27.1.1",
+    "@react-native-firebase/database": "27.1.1",
+    "@react-native-firebase/functions": "27.1.1",
     "@sentry/react-native": "8.36.0",
     "@bugsnag/react-native": "9.1.0",
-    "@datadog/mobile-react-native": "3.12.0",
+    "@datadog/mobile-react-native": "3.13.0",
     "@segment/analytics-react-native": "2.24.2",
     "mixpanel-react-native": "4.1.0",
-    "@amplitude/analytics-react-native": "1.13.2",
-    "posthog-react-native": "4.87.0",
-    "clevertap-react-native": "4.5.0",
+    "@amplitude/analytics-react-native": "1.13.3",
+    "posthog-react-native": "4.87.1",
+    "clevertap-react-native": "4.6.0",
     "@braze/react-native-sdk": "24.0.1",
     "klaviyo-react-native-sdk": "2.7.0",
     "react-native-moengage": "13.2.0",
@@ -203,6 +305,9 @@
     "react-native-purchases": "11.0.4",
     "@intercom/intercom-react-native": "10.10.0",
     "@luciq/react-native": "19.13.0",
-    "instabug-reactnative": "16.0.3"
+    "instabug-reactnative": "16.0.3",
+    "@stripe/stripe-react-native": "0.85.1",
+    "react-native-maps": "1.29.11",
+    "@react-native-google-signin/google-signin": "17.0.0"
   }
 }

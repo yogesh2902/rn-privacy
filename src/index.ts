@@ -27,3 +27,10 @@ export { planInit, applyInit, workflowYaml, detectPackageManager } from './init.
 export type { InitPlan, InitStep } from './init.js';
 export { formatAppStore, ASC_TYPES, ASC_PURPOSES } from './appstore.js';
 export { formatInventory } from './inventory.js';
+export { explain, formatWhy } from './why.js';
+export type { WhyMatch, WhyReason } from './why.js';
+export { PURPOSE_KEYS, findPurposeUses, findPurposeUsesInBinary, podfilePermissions } from './purpose.js';
+export { checkAppPurposes, findAppInfoPlist, EXPO_PLUGIN_KEYS } from './infoplist.js';
+export type { PurposeCheck, PurposeStatus } from './infoplist.js';
+export { scanAppNative, scanLocalModules, podfileTargets } from './scanner.js';
+export type { CheckedExtension } from './check.js';

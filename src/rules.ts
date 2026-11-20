@@ -117,6 +117,102 @@ export const RULES: LibraryRule[] = [
     },
   },
 
+  {
+    packages: ['@react-native-firebase/firestore'],
+    name: 'Cloud Firestore',
+    collects: [],
+    sources: ['https://firebase.google.com/docs/ios/app-store-data-collection'],
+    notes: 'Google says the iOS SDK only sends the Firebase user agent (SDK and platform versions). Data your app stores in Firestore is yours to declare.',
+    android: {
+      collects: [{ type: 'user-id', purposes: ['app-functionality'], conditional: 'Only when users sign in with Firebase Authentication' }],
+      sources: ['https://firebase.google.com/docs/android/play-data-disclosure'],
+      notes: 'Requests carry the Firebase Auth user ID when a user is signed in. Google describes purposes in prose; rn-privacy uses App functionality.',
+    },
+  },
+  {
+    packages: ['@react-native-firebase/remote-config'],
+    name: 'Remote Config',
+    collects: [{ type: 'other-diagnostic', purposes: ['app-functionality'], linked: false, tracking: false }],
+    sources: ['https://firebase.google.com/docs/ios/app-store-data-collection'],
+    notes: 'Google lists country code, language, time zone, OS version and app IDs, used to target parameters; rn-privacy maps these to Other diagnostic data. With Analytics, user properties are used too; with personalization, data feeds Google\'s models.',
+    android: {
+      collects: [
+        { type: 'other-diagnostic', purposes: ['app-functionality'] },
+        { type: 'device-id', purposes: ['app-functionality'] },
+      ],
+      sources: ['https://firebase.google.com/docs/android/play-data-disclosure'],
+      notes: 'Device or other IDs is the Firebase installation ID, which Google says to account for. The other fields are mapped by rn-privacy to Other app performance data.',
+    },
+  },
+  {
+    packages: ['@react-native-firebase/app-check'],
+    name: 'App Check',
+    collects: [{ type: 'device-id', purposes: ['app-functionality'], linked: false, tracking: false }],
+    sources: ['https://firebase.google.com/docs/ios/app-store-data-collection'],
+    notes: 'Depends on the provider: a DeviceCheck token, App Attest attestations, or a reCAPTCHA Enterprise token (reCAPTCHA has its own disclosures). rn-privacy maps tokens to Device ID; Apple has no fraud prevention purpose, so App functionality.',
+    android: {
+      collects: [{ type: 'device-id', purposes: ['fraud-prevention'] }],
+      sources: ['https://firebase.google.com/docs/android/play-data-disclosure'],
+      notes: 'A Play Integrity or reCAPTCHA token, used to protect your backend from abuse; rn-privacy maps it to Device or other IDs and Fraud prevention.',
+    },
+  },
+  {
+    packages: ['@react-native-firebase/in-app-messaging'],
+    name: 'In-App Messaging',
+    collects: [{ type: 'product-interaction', purposes: ['analytics'], linked: false, tracking: false }],
+    sources: ['https://firebase.google.com/docs/ios/app-store-data-collection'],
+    notes: 'Message impressions, clicks and dismissals. In-App Messaging needs Google Analytics, which has its own rule.',
+    android: {
+      collects: [
+        { type: 'product-interaction', purposes: ['analytics', 'app-functionality'] },
+        { type: 'device-id', purposes: ['app-functionality'] },
+      ],
+      sources: ['https://firebase.google.com/docs/android/play-data-disclosure'],
+      notes: 'Device or other IDs is the Firebase installation ID, which Google says to account for. Messages are targeted with Analytics user properties.',
+    },
+  },
+  {
+    packages: ['@react-native-firebase/storage'],
+    name: 'Cloud Storage for Firebase',
+    collects: [],
+    sources: ['https://firebase.google.com/docs/ios/app-store-data-collection'],
+    notes: 'Google says the iOS SDK only sends the Firebase user agent. Files your users upload are yours to declare (photos, audio...).',
+    android: {
+      collects: [{ type: 'user-id', purposes: ['app-functionality'], conditional: 'Only when users sign in with Firebase Authentication' }],
+      sources: ['https://firebase.google.com/docs/android/play-data-disclosure'],
+      notes: 'Requests carry the Firebase Auth user ID when a user is signed in. Files your users upload are yours to declare.',
+    },
+  },
+  {
+    packages: ['@react-native-firebase/database'],
+    name: 'Realtime Database',
+    collects: [],
+    sources: ['https://firebase.google.com/docs/ios/app-store-data-collection'],
+    notes: 'Google says the iOS SDK only sends the Firebase user agent. Data your app stores is yours to declare.',
+    android: {
+      collects: [
+        { type: 'other-diagnostic', purposes: ['analytics'] },
+        { type: 'user-id', purposes: ['app-functionality'], conditional: 'Only when users sign in with Firebase Authentication' },
+      ],
+      sources: ['https://firebase.google.com/docs/android/play-data-disclosure'],
+      notes: 'IP address and user agent for the usage profiler; Play has no IP type, so rn-privacy uses Other app performance data and Analytics.',
+    },
+  },
+  {
+    packages: ['@react-native-firebase/functions'],
+    name: 'Cloud Functions for Firebase',
+    collects: [{ type: 'other-diagnostic', purposes: ['app-functionality'], linked: false, tracking: false }],
+    sources: ['https://firebase.google.com/docs/ios/app-store-data-collection'],
+    notes: 'Each call sends the function name and the caller\'s IP address; rn-privacy maps that to Other diagnostic data. What you pass to your functions is yours to declare.',
+    android: {
+      collects: [
+        { type: 'device-id', purposes: ['app-functionality'] },
+        { type: 'user-id', purposes: ['app-functionality'], conditional: 'Only when users sign in with Firebase Authentication' },
+      ],
+      sources: ['https://firebase.google.com/docs/android/play-data-disclosure'],
+      notes: 'Calls also send the FCM token (even without the Messaging SDK), mapped to Device or other IDs.',
+    },
+  },
   // ------------------------------------------------------ Crash / monitoring
   {
     packages: ['@sentry/react-native'],
@@ -541,6 +637,69 @@ export const RULES: LibraryRule[] = [
       sources: ['https://docs.luciq.ai/android/set-up-luciq-for-android/play-store-privacy-details'],
       notes: 'Luciq lists what it collects but not why or whether it is shared. Approximate location comes from the IP address (Luciq support can turn it off); most other data can be turned off with SDK APIs. In-app replies, if enabled, add "Other in-app messages".',
     },
+  },
+  {
+    packages: ['@stripe/stripe-react-native'],
+    name: 'Stripe',
+    // From the PrivacyInfo.xcprivacy files in stripe-ios and Stripe's mobile SDK privacy page.
+    collects: [
+      { type: 'product-interaction', purposes: ['analytics', 'app-functionality'], linked: true, tracking: false },
+      { type: 'user-id', purposes: ['app-functionality'], linked: true, tracking: false, conditional: 'Only if you use Stripe customers or customer ephemeral keys' },
+      { type: 'email', purposes: ['app-functionality'], linked: true, tracking: false, conditional: 'Only if users enter it in Stripe\'s UI' },
+      { type: 'name', purposes: ['app-functionality'], linked: true, tracking: false, conditional: 'Only if users enter it in Stripe\'s UI' },
+      { type: 'phone', purposes: ['app-functionality'], linked: true, tracking: false, conditional: 'Only if users enter it in Stripe\'s UI' },
+    ],
+    sources: [
+      'https://support.stripe.com/questions/stripe-mobile-sdk-privacy-details',
+      'https://github.com/stripe/stripe-ios/blob/master/StripeCore/StripeCore/PrivacyInfo.xcprivacy',
+      'https://github.com/stripe/stripe-ios/blob/master/StripePaymentSheet/StripePaymentSheet/PrivacyInfo.xcprivacy',
+    ],
+    notes: 'Stripe also declares Payment info (NSPrivacyCollectedDataTypePaymentInfo, App functionality, linked), which rn-privacy has no type for yet: declare it yourself, and in Play as Financial info > Credit card, debit card or bank account number. 3D Secure sends device details to the card network. Stripe says the data is never used for advertising. Stripe publishes no Google Play Data safety guidance.',
+  },
+  {
+    packages: ['react-native-maps'],
+    name: 'Google Maps SDK (react-native-maps)',
+    // iOS: from the PrivacyInfo.xcprivacy in Google's ios-maps-sdk. react-native-maps uses Apple Maps on iOS unless you choose Google.
+    collects: [
+      // From the PrivacyInfo.xcprivacy react-native-maps itself ships (ios/), for every provider.
+      { type: 'precise-location', purposes: ['app-functionality'], linked: false, tracking: false },
+      { type: 'crash-data', purposes: ['analytics'], linked: false, tracking: false, conditional: 'Only with PROVIDER_GOOGLE on iOS' },
+      { type: 'device-id', purposes: ['analytics', 'app-functionality'], linked: true, tracking: false, conditional: 'Only with PROVIDER_GOOGLE on iOS' },
+      { type: 'performance-data', purposes: ['analytics'], linked: false, tracking: false, conditional: 'Only with PROVIDER_GOOGLE on iOS' },
+      { type: 'product-interaction', purposes: ['analytics'], linked: false, tracking: false, conditional: 'Only with PROVIDER_GOOGLE on iOS' },
+    ],
+    sources: [
+      'https://github.com/react-native-maps/react-native-maps/blob/master/ios/PrivacyInfo.xcprivacy',
+      'https://github.com/googlemaps/ios-maps-sdk/blob/main/Maps/Resources/GoogleMapsResources/GoogleMaps.bundle/PrivacyInfo.xcprivacy',
+      'https://developers.google.com/maps/documentation/ios-sdk/apple-privacy-policy',
+    ],
+    notes: 'react-native-maps declares Precise location (App functionality) in its own manifest for every provider. With the Google provider, Google also declares "Other data types" (analytics, linked).',
+    android: {
+      collects: [
+        { type: 'crash-data', purposes: ['analytics'] },
+        { type: 'other-diagnostic', purposes: ['analytics'] },
+        { type: 'device-id', purposes: ['analytics'] },
+        { type: 'product-interaction', purposes: ['analytics'], conditional: 'Map interaction events, only when you use the map camera APIs' },
+      ],
+      sources: ['https://developers.google.com/maps/documentation/android-sdk/play-data-disclosure'],
+      notes: 'Android always uses the Google Maps SDK. Google lists stack traces, request metadata, a pseudonymous SDK identifier and the IP address, used to improve its services and the SDK; rn-privacy maps these to the Play types above with Analytics. Google does not say whether data is shared.',
+    },
+  },
+  {
+    packages: ['@react-native-google-signin/google-signin'],
+    name: 'Google Sign-In',
+    // From the PrivacyInfo.xcprivacy in GoogleSignIn-iOS.
+    collects: [
+      { type: 'name', purposes: ['app-functionality'], linked: true, tracking: false },
+      { type: 'email', purposes: ['app-functionality'], linked: true, tracking: false },
+      { type: 'phone', purposes: ['app-functionality'], linked: true, tracking: false },
+      { type: 'coarse-location', purposes: ['app-functionality'], linked: true, tracking: false },
+      { type: 'user-id', purposes: ['app-functionality', 'analytics'], linked: true, tracking: false },
+      { type: 'device-id', purposes: ['analytics'], linked: true, tracking: false },
+      { type: 'other-usage', purposes: ['analytics'], linked: true, tracking: false },
+    ],
+    sources: ['https://github.com/google/GoogleSignIn-iOS/blob/main/GoogleSignIn/Sources/Resources/PrivacyInfo.xcprivacy'],
+    notes: 'Google also declares "Other data types" (linked). Google publishes no Play Data safety guidance for play-services-auth or Credential Manager; the name, email and profile picture your app receives at sign-in are yours to declare.',
   },
   // ---------------------------------- Device access (declare only if sent off the device)
   {

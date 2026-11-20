@@ -3,6 +3,7 @@ import { API_LABELS, DEFAULT_REASONS } from './apis.js';
 import { DATA_TYPES, PLAY_PURPOSES, PURPOSES } from './types.js';
 import type { Analysis, DataFinding } from './analyze.js';
 import { trackingDomains } from './analyze.js';
+import { PURPOSE_KEYS } from './purpose.js';
 import { audit as runAudit, auditProblemCount, categoryList } from './audit.js';
 import type { Audit, LibraryRef } from './audit.js';
 import type { Purpose, ScanResult } from './types.js';
@@ -50,6 +51,22 @@ export function formatScan(scan: ScanResult, a: Analysis): string {
   if (a.access.length) {
     lines.push(c.bold('Sensitive data your app can read'), c.dim('  Declare it only if your app sends it off the device.'));
     for (const acc of a.access) lines.push(`  ${DATA_TYPES[acc.type].label.padEnd(22)} ${c.dim(`via ${acc.packages.join(', ')}`)}`);
+    lines.push('');
+  }
+
+  if (a.purposes.length) {
+    lines.push(c.bold('Info.plist purpose strings'), c.dim('  Your code or libraries ask for this access. `rn-privacy check` verifies Info.plist has them (ITMS-90683).'));
+    for (const p of a.purposes) lines.push(`  ${p.key.padEnd(44)} ${c.dim(`${PURPOSE_KEYS[p.key].label}, asked for by ${p.packages.join(', ')}`)}`);
+    lines.push('');
+  }
+
+  const exts = scan.extensions.filter((e) => e.apis.size || e.purposeUses.size);
+  if (exts.length) {
+    lines.push(c.bold('App extensions'), c.dim('  Each extension is its own bundle and needs its own privacy manifest.'));
+    for (const e of exts) {
+      const apis = [...e.apis.keys()].map((k) => API_LABELS[k]).join(', ');
+      lines.push(`  ${e.dir.padEnd(32)} ${apis || c.dim('no required reason APIs')}${e.manifest ? '' : apis ? c.yellow('  (no manifest)') : ''}`);
+    }
     lines.push('');
   }
 
@@ -269,6 +286,13 @@ export function formatMarkdown(scan: ScanResult, a: Analysis): string {
     out.push('');
   }
 
+  if (a.purposes.length) {
+    out.push('## Info.plist purpose strings', '', 'Your code or libraries ask for this access, so Info.plist needs these keys, each with a sentence telling users why (App Store Connect rejects the upload otherwise: ITMS-90683).', '');
+    out.push('| Key | Access | Asked for by |', '| --- | --- | --- |');
+    for (const p of a.purposes) out.push(`| \`${p.key}\` | ${PURPOSE_KEYS[p.key].label} | ${p.packages.join(', ')} |`);
+    out.push('');
+  }
+
   if (a.warnings.length) {
     out.push('## Warnings', '');
     for (const w of a.warnings) out.push(`- ${w.pkg ? `**${w.pkg}**: ` : ''}${w.message}`);
@@ -322,5 +346,7 @@ export function toJson(scan: ScanResult, a: Analysis) {
     android: a.android,
     androidMergedManifest: scan.android.mergedFile,
     play: a.play,
+    purposeStrings: a.purposes.map((p) => ({ ...p, label: PURPOSE_KEYS[p.key].label })),
+    extensions: scan.extensions.map((e) => ({ name: e.name, dir: e.dir, kind: e.kind, apis: [...e.apis.keys()], purposeStrings: [...e.purposeUses.keys()], hasManifest: !!e.manifest, pods: e.pods })),
   };
 }

@@ -7,6 +7,7 @@ import { API_LABELS } from './apis.js';
 import { DATA_TYPES } from './types.js';
 import type { ApiCategory, DataType, ScanResult } from './types.js';
 import { SENSITIVE_PERMISSIONS } from './android.js';
+import { PURPOSE_KEYS } from './purpose.js';
 
 /**
  * A privacy snapshot: what your dependencies need, in a small file you commit
@@ -25,6 +26,8 @@ export interface Snapshot {
   android: Record<string, string[]>;
   /** Native libraries and their versions. */
   libraries: Record<string, string>;
+  /** Info.plist purpose strings the code asks for, and who asks. Missing in snapshots before 0.5.0. */
+  purposeStrings?: Record<string, string[]>;
 }
 
 const sorted = <T>(list: T[]) => [...list].sort();
@@ -43,6 +46,7 @@ export function buildSnapshot(scan: ScanResult, a: Analysis): Snapshot {
     }])),
     trackingDomains: trackingDomains(a),
     android: sortedRecord(a.android.map((p) => [p.permission, sorted(p.sources)])),
+    purposeStrings: sortedRecord(a.purposes.map((p) => [p.key, sorted(p.packages)])),
     libraries: sortedRecord(scan.packages.filter((p) => p.hasIosNative || p.androidPermissions.length || p.rule).map((p) => [p.name, p.version])),
   };
 }
@@ -96,11 +100,12 @@ export interface SnapshotDiff {
   data: Change[];
   trackingDomains: Change[];
   android: Change[];
+  purposeStrings: Change[];
   libraries: Change[];
 }
 
 export function diffSnapshots(base: Snapshot, current: Snapshot): SnapshotDiff {
-  const diff: SnapshotDiff = { apis: [], data: [], trackingDomains: [], android: [], libraries: [] };
+  const diff: SnapshotDiff = { apis: [], data: [], trackingDomains: [], android: [], purposeStrings: [], libraries: [] };
   const list = (xs: string[]) => xs.join(', ');
   const delta = (before: string[], after: string[]) =>
     [...after.filter((x) => !before.includes(x)).map((x) => `+${x}`), ...before.filter((x) => !after.includes(x)).map((x) => `-${x}`)];
@@ -133,6 +138,14 @@ export function diffSnapshots(base: Snapshot, current: Snapshot): SnapshotDiff {
     return p.length ? `from ${p.join(' ')}` : '';
   }, (v) => list(v));
 
+  // Snapshots written before 0.5.0 have no purpose strings: do not report them all as new.
+  if (base.purposeStrings) {
+    compare(base.purposeStrings, current.purposeStrings ?? {}, (k) => `${k} (${PURPOSE_KEYS[k]?.label ?? k})`, diff.purposeStrings, (b, c) => {
+      const p = delta(b, c);
+      return p.length ? `asked for by ${p.join(' ')}` : '';
+    }, (v) => `asked for by ${list(v)}`);
+  }
+
   compare(base.libraries, current.libraries, (k) => k, diff.libraries, (b, c) => (b !== c ? `${b} → ${c}` : ''), (v) => v);
   return diff;
 }
@@ -156,7 +169,7 @@ function compare<T>(
 }
 
 export function changeCount(d: SnapshotDiff): number {
-  return d.apis.length + d.data.length + d.trackingDomains.length + d.android.length + d.libraries.length;
+  return d.apis.length + d.data.length + d.trackingDomains.length + d.android.length + d.purposeStrings.length + d.libraries.length;
 }
 
 /** Changes that matter for the stores (everything except library versions). */
@@ -177,6 +190,7 @@ export function formatDiff(d: SnapshotDiff, against: string, paint: { green: (s:
   section('Data collected by your libraries', d.data);
   section('Tracking domains', d.trackingDomains);
   section('Android permissions', d.android);
+  section('Info.plist purpose strings', d.purposeStrings);
   section('Native libraries', d.libraries);
   if (!changeCount(d)) lines.push(paint.green('No privacy changes.'));
   else if (!privacyChangeCount(d)) lines.push(paint.green('Only library versions changed: no privacy changes.'));

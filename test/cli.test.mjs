@@ -1061,3 +1061,193 @@ test('rule freshness: manifest summaries, tarballs and changes', async () => {
   const baseline = JSON.parse(fs.readFileSync(fresh.BASELINE, 'utf8'));
   assert.ok(Object.keys(baseline.manifests).length >= 10, 'the committed baseline covers the vendor manifests');
 });
+
+const plistXml = (dict) => `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>${Object.entries(dict).map(([k, v]) => `<key>${k}</key>${typeof v === 'string' && !v.startsWith('<') ? `<string>${v}</string>` : v}`).join('')}</dict></plist>`;
+
+test('purpose strings: requests in code and binaries need Info.plist keys (ITMS-90683)', () => {
+  const hits = api.findPurposeUses(`
+    [CLLocationManager new]; // requestAlwaysAuthorization in a comment does not count
+    [self.manager requestWhenInUseAuthorization];
+    [AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:^(BOOL g){}];
+    let store = CNContactStore()
+    UIImagePickerController *p; // only a class: no photo library request
+  `).map((h) => h.key);
+  assert.deepEqual(hits.sort(), ['NSCameraUsageDescription', 'NSContactsUsageDescription', 'NSLocationWhenInUseUsageDescription']);
+  const bin = Buffer.concat([Buffer.from('\0requestAccessForMediaType:completionHandler:\0\0_AVMediaTypeAudio\0\0requestAlwaysAuthorization\0', 'latin1')]);
+  assert.deepEqual(api.findPurposeUsesInBinary(bin).map((h) => h.key).sort(), ['NSLocationAlwaysAndWhenInUseUsageDescription', 'NSLocationWhenInUseUsageDescription', 'NSMicrophoneUsageDescription']);
+
+  const dir = fixture('purpose');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'react-native': '0.76.0', 'cam-lib': '1.0.0', 'react-native-permissions': '5.0.0', 'face-lib': '1.0.0' } },
+    'node_modules/cam-lib/package.json': { name: 'cam-lib', version: '1.0.0' },
+    'node_modules/cam-lib/cam-lib.podspec': '',
+    'node_modules/cam-lib/ios/Cam.m': '[AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:nil];\n[AVAudioSession.sharedInstance requestRecordPermission:^(BOOL g){}];',
+    'node_modules/face-lib/package.json': { name: 'face-lib', version: '1.0.0' },
+    'node_modules/face-lib/face-lib.podspec': '',
+    'node_modules/face-lib/ios/F.m': '[ctx evaluatePolicy:LAPolicyDeviceOwnerAuthenticationWithBiometrics localizedReason:@"x" reply:nil];',
+    'node_modules/react-native-permissions/package.json': { name: 'react-native-permissions', version: '5.0.0' },
+    'node_modules/react-native-permissions/RNPermissions.podspec': '',
+    'node_modules/react-native-permissions/ios/Contacts/RNPermissionHandlerContacts.mm': 'CNContactStore *s;',
+    'node_modules/react-native-permissions/ios/Motion/RNPermissionHandlerMotion.mm': 'CMMotionActivityManager *m;',
+    'ios/Podfile': "setup_permissions([\n  'Motion',\n  # 'Contacts',\n])\ntarget 'App' do\nend\n",
+    'ios/App.xcodeproj/project.pbxproj': '',
+    'ios/App/Info.plist': plistXml({ CFBundleExecutable: 'App', NSCameraUsageDescription: 'Scan receipts', NSMicrophoneUsageDescription: '' }),
+  });
+  const r = run(dir, 'check', '--format', 'json');
+  const j = JSON.parse(r.stdout);
+  const by = Object.fromEntries(j.purposeStrings.map((p) => [p.key, p]));
+  assert.equal(by.NSCameraUsageDescription.status, 'ok');
+  assert.equal(by.NSMicrophoneUsageDescription.status, 'empty');
+  assert.equal(by.NSMotionUsageDescription.status, 'missing', 'enabled react-native-permissions handler');
+  assert.equal(by.NSContactsUsageDescription, undefined, 'handler commented out in setup_permissions');
+  assert.equal(by.NSFaceIDUsageDescription.runtimeOnly, true);
+  assert.equal(j.ok, false);
+  assert.equal(r.status, 1);
+  const text = run(dir, 'check');
+  assert.match(text.stderr, /NSMotionUsageDescription \(Motion and fitness\) is missing from ios\/App\/Info\.plist, asked for by react-native-permissions\. App Store Connect rejects this \(ITMS-90683\)/);
+  assert.match(text.stderr, /NSMicrophoneUsageDescription .* is empty/);
+  assert.match(text.stdout, /NSFaceIDUsageDescription .* iOS refuses the feature without it/);
+  assert.match(text.stderr, /Add the missing purpose strings to Info\.plist/);
+
+  // Fill them in: only Face ID (runtime only) is left, and it does not fail the check.
+  write(dir, { 'ios/App/Info.plist': plistXml({ CFBundleExecutable: 'App', NSCameraUsageDescription: 'a', NSMicrophoneUsageDescription: 'b', NSMotionUsageDescription: 'c' }) });
+  const ok = JSON.parse(run(dir, 'check', '--format', 'json').stdout);
+  assert.ok(ok.purposeStrings.every((p) => p.status === 'ok' || p.runtimeOnly));
+  assert.equal(ok.manifests.length, 0);
+});
+
+test('purpose strings in Expo: app.json infoPlist and the config plugins that add them', () => {
+  const dir = fixture('purpose-expo');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { expo: '54.0.0', 'expo-camera': '17.0.0', 'expo-tracking-transparency': '6.0.0', 'ble-lib': '1.0.0', 'loc-lib': '1.0.0' } },
+    'app.json': { expo: { name: 'App', plugins: ['rn-privacy', 'loc-lib'], ios: { infoPlist: { NSBluetoothAlwaysUsageDescription: 'Connect to your scale' } } } },
+    'node_modules/expo/package.json': { name: 'expo', version: '54.0.0' },
+    ...Object.fromEntries([
+      ['expo-camera', '[AVCaptureDevice requestAccessForMediaType:AVMediaTypeVideo completionHandler:nil];'],
+      ['expo-tracking-transparency', '[ATTrackingManager requestTrackingAuthorizationWithCompletionHandler:nil];'],
+      ['ble-lib', 'CBCentralManager *m;'],
+      ['loc-lib', '[m requestWhenInUseAuthorization];'],
+    ].flatMap(([name, code]) => [
+      [`node_modules/${name}/package.json`, { name, version: '1.0.0' }],
+      [`node_modules/${name}/${name}.podspec`, ''],
+      [`node_modules/${name}/ios/X.m`, code],
+    ])),
+  });
+  const j = JSON.parse(run(dir, 'check', '--format', 'json').stdout);
+  const by = Object.fromEntries(j.purposeStrings.map((p) => [p.key, p]));
+  assert.equal(by.NSCameraUsageDescription.status, 'by-plugin', 'expo-camera adds it even when not listed');
+  assert.equal(by.NSCameraUsageDescription.plugin, 'expo-camera');
+  assert.equal(by.NSUserTrackingUsageDescription.status, 'missing', 'expo-tracking-transparency only adds it when listed');
+  assert.equal(by.NSBluetoothAlwaysUsageDescription.status, 'ok');
+  assert.equal(by.NSLocationWhenInUseUsageDescription.status, 'by-plugin', 'the library\'s own plugin is listed');
+  assert.equal(j.ok, false);
+});
+
+test('app code, Expo local modules and app extensions are scanned', () => {
+  const dir = fixture('native');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'react-native': '0.76.0' } },
+    'modules/secure-store/expo-module.config.json': { platforms: ['apple'] },
+    'modules/secure-store/ios/SecureStore.swift': 'let t = ProcessInfo.processInfo.systemUptime',
+    'ios/App.xcodeproj/project.pbxproj': '',
+    'ios/App/Info.plist': plistXml({ CFBundleExecutable: 'App' }),
+    'ios/App/AppDelegate.swift': 'UserDefaults.standard.bool(forKey: "x")',
+    'ios/App/PrivacyInfo.xcprivacy': manifestXml([['NSPrivacyAccessedAPICategoryUserDefaults', 'CA92.1'], ['NSPrivacyAccessedAPICategorySystemBootTime', '35F9.1']]),
+    'ios/Widget/Info.plist': plistXml({ NSExtension: '<dict><key>NSExtensionPointIdentifier</key><string>com.apple.widgetkit-extension</string></dict>' }),
+    'ios/Widget/Widget.swift': 'let free = try url.resourceValues(forKeys: [.volumeAvailableCapacityKey])',
+    'ios/Widget/PrivacyInfo.xcprivacy': manifestXml([['NSPrivacyAccessedAPICategoryUserDefaults', 'CA92.1']]),
+    'ios/Notify/Info.plist': plistXml({ NSExtension: '<dict><key>NSExtensionPointIdentifier</key><string>com.apple.usernotifications.service</string></dict>' }),
+    'ios/Notify/N.swift': 'class N {}',
+    'ios/Podfile': "target 'App' do\nend\ntarget 'Notify' do\n  pod 'PushKit'\nend\n",
+    'ios/Pods/PushKit/PushKit.framework/PushKit': Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(60), Buffer.from('\0_OBJC_CLASS_$_NSUserDefaults\0')]).toString('latin1'),
+  });
+  // write() stores strings as utf8: rewrite the binary as bytes.
+  fs.writeFileSync(path.join(dir, 'ios/Pods/PushKit/PushKit.framework/PushKit'), Buffer.concat([Buffer.from([0xcf, 0xfa, 0xed, 0xfe]), Buffer.alloc(60), Buffer.from('\0_OBJC_CLASS_$_NSUserDefaults\0')]));
+  const scan = scanProject(dir);
+  const names = scan.packages.map((p) => p.name);
+  assert.ok(names.includes('modules/secure-store (local module)'));
+  assert.ok(names.includes('your app (ios)'));
+  assert.deepEqual(scan.extensions.map((e) => e.name).sort(), ['Notify', 'Widget']);
+  const a = analyze(scan);
+  assert.deepEqual(a.apis.find((x) => x.category === 'NSPrivacyAccessedAPICategorySystemBootTime').packages, ['modules/secure-store (local module)']);
+  assert.ok(!a.apis.some((x) => x.category === 'NSPrivacyAccessedAPICategoryDiskSpace'), 'extension code is not in the app manifest');
+  assert.equal(scan.packages.find((p) => p.name === 'your app (ios)').shipsManifest.length, 0, 'the app manifest is not read as a library manifest');
+
+  const j = JSON.parse(run(dir, 'check', '--format', 'json').stdout);
+  assert.equal(j.manifests[0].label, path.join('ios', 'App', 'PrivacyInfo.xcprivacy'), 'the app manifest, not an extension\'s');
+  const ext = Object.fromEntries(j.extensions.map((e) => [e.name, e]));
+  assert.equal(ext.Widget.status, 'missing-apis');
+  assert.deepEqual(ext.Widget.missingApis.map((m) => m.label), ['Disk space']);
+  assert.equal(ext.Notify.status, 'missing', 'its pod has no manifest and uses user defaults');
+  assert.deepEqual(ext.Notify.missingApis[0].packages, ['PushKit (CocoaPods)']);
+
+  const w = run(dir, 'ios', '--write');
+  assert.equal(w.status, 0, w.stderr);
+  assert.match(w.stdout, /add it to the Notify target/);
+  assert.match(fs.readFileSync(path.join(dir, 'ios/Widget/PrivacyInfo.xcprivacy'), 'utf8'), /DiskSpace[\s\S]*E174\.1/);
+  const after = JSON.parse(run(dir, 'check', '--format', 'json').stdout);
+  assert.ok(after.extensions.every((e) => e.status === 'ok'));
+  assert.equal(after.ok, true);
+});
+
+test('podfile parsing: targets and react-native-permissions', () => {
+  const targets = api.podfileTargets("target 'App' do\n  pod 'A'\n  target 'AppTests' do\n    inherit! :search_paths\n  end\nend\ntarget 'Ext' do\n  pod 'B/Core', '1.0'\n  [1].each do |x|\n  end\n  pod 'C'\nend\n");
+  assert.deepEqual(Object.fromEntries(targets), { App: ['A'], AppTests: [], Ext: ['B', 'C'] });
+  assert.deepEqual([...api.podfilePermissions("setup_permissions(['Camera', \"Motion\"])")].sort(), ['Camera', 'Motion']);
+  assert.equal(api.podfilePermissions('target "x" do end'), null);
+});
+
+test('why: explains APIs, purpose strings, data, permissions and packages', () => {
+  const dir = fixture('why');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'native-lib': '1.0.0', '@sentry/react-native': '6.0.0' } },
+    'node_modules/native-lib/package.json': { name: 'native-lib', version: '1.2.3' },
+    'node_modules/native-lib/native-lib.podspec': '',
+    'node_modules/native-lib/ios/A.m': 'struct statfs s; statfs("/", &s);\n[m requestWhenInUseAuthorization];',
+    'node_modules/native-lib/android/src/main/AndroidManifest.xml': '<manifest xmlns:android="http://schemas.android.com/apk/res/android"><uses-permission android:name="android.permission.CAMERA"/></manifest>',
+    'node_modules/@sentry/react-native/package.json': { name: '@sentry/react-native', version: '6.0.0' },
+  });
+  const api1 = run(dir, 'why', 'Disk', 'space');
+  assert.equal(api1.status, 0);
+  assert.match(api1.stdout, /native-lib@1\.2\.3\n\s+code node_modules\/native-lib\/ios\/A\.m: statfs/);
+  assert.match(run(dir, 'why', 'NSLocationWhenInUseUsageDescription').stdout, /ITMS-90683/);
+  assert.match(run(dir, 'why', 'crash data').stdout, /@sentry\/react-native[\s\S]*rn-privacy's rule for Sentry/);
+  assert.match(run(dir, 'why', 'CAMERA').stdout, /native-lib[\s\S]*AndroidManifest\.xml/);
+  assert.match(run(dir, 'why', 'native-lib').stdout, /uses Disk space[\s\S]*needs NSLocationWhenInUseUsageDescription[\s\S]*adds the Android permission CAMERA/);
+  const json = JSON.parse(run(dir, 'why', 'Disk space', '--format', 'json').stdout);
+  assert.equal(json.matches[0].kind, 'api');
+  const none = run(dir, 'why', 'nothing-like-this');
+  assert.equal(none.status, 1);
+  assert.match(none.stdout, /Nothing matches/);
+  assert.equal(run(dir, 'why').status, 2);
+});
+
+test('snapshot and diff include purpose strings, and old snapshots do not flag them all', () => {
+  const dir = fixture('snap-purpose');
+  write(dir, {
+    'package.json': { name: 'App', dependencies: { 'loc-lib': '1.0.0' } },
+    'node_modules/loc-lib/package.json': { name: 'loc-lib', version: '1.0.0' },
+    'node_modules/loc-lib/loc-lib.podspec': '',
+    'node_modules/loc-lib/ios/L.m': '[m requestWhenInUseAuthorization];',
+  });
+  run(dir, 'snapshot');
+  const snap = JSON.parse(fs.readFileSync(path.join(dir, 'privacy-snapshot.json'), 'utf8'));
+  assert.deepEqual(snap.purposeStrings, { NSLocationWhenInUseUsageDescription: ['loc-lib'] });
+  write(dir, { 'node_modules/loc-lib/ios/L.m': '[m requestWhenInUseAuthorization];\n[m requestAlwaysAuthorization];' });
+  assert.match(run(dir, 'diff').stdout, /Info\.plist purpose strings[\s\S]*\+ NSLocationAlwaysAndWhenInUseUsageDescription/);
+  delete snap.purposeStrings;
+  fs.writeFileSync(path.join(dir, 'privacy-snapshot.json'), JSON.stringify(snap));
+  assert.doesNotMatch(run(dir, 'diff').stdout, /purpose strings/);
+});
+
+test('rules: Firebase products, Stripe, Google Maps and Google Sign-In', () => {
+  for (const pkg of ['@react-native-firebase/firestore', '@react-native-firebase/remote-config', '@react-native-firebase/app-check', '@react-native-firebase/in-app-messaging', '@react-native-firebase/storage', '@react-native-firebase/database', '@react-native-firebase/functions', '@stripe/stripe-react-native', 'react-native-maps', '@react-native-google-signin/google-signin']) {
+    const rule = findRule(pkg);
+    assert.ok(rule, pkg);
+    assert.ok(rule.sources.length && rule.sources.every((s) => s.startsWith('https://')), pkg);
+  }
+  assert.ok(findRule('react-native-maps').collects.filter((c) => c.type !== 'precise-location').every((c) => c.conditional), 'Google data only with the Google provider');
+  assert.equal(findRule('@stripe/stripe-react-native').android, undefined, 'no Play guidance from Stripe');
+});

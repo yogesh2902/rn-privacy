@@ -6,6 +6,7 @@ import { analyze, toApiUsages, toCollected, toPlayCollected, trackingDomains } f
 import { audit, auditProblemCount } from './audit.js';
 import { expoSnippet, expoWriteTarget, findExpoConfig, findIosManifest, planExpoAppJson, planIosManifest } from './ios.js';
 import { readManifest } from './manifest.js';
+import { DEFAULT_REASONS } from './apis.js';
 import { fillPlayCsv } from './play.js';
 import { validateManifest } from './validate.js';
 import { formatCheck, readExpoPrivacy, runCheck } from './check.js';
@@ -17,6 +18,7 @@ import { scanProject } from './scanner.js';
 import { applyInit, planInit } from './init.js';
 import { formatAppStore } from './appstore.js';
 import { formatInventory } from './inventory.js';
+import { explain, formatWhy } from './why.js';
 
 // Read from package.json so a release only needs one version bump.
 const VERSION: string = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
@@ -33,10 +35,11 @@ ${c.bold('Commands')}
   ios       Update your PrivacyInfo.xcprivacy (bare) or app.json (Expo). Dry run unless --write
   report    Answers for App Store Connect "App Privacy" and Google Play "Data safety"
   play      Fill in the Data safety CSV exported from Play Console: rn-privacy play data_safety.csv -o filled.csv
-  check     For CI: exit with code 1 if your manifest is missing or invalid
+  check     For CI: exit with code 1 if a privacy manifest or an Info.plist permission text is missing or invalid
   audit     Check the privacy manifests your libraries ship, and where to report problems
   snapshot  Save what your dependencies need to privacy-snapshot.json (commit it)
   diff      Show privacy changes since the snapshot: new APIs, data, tracking, permissions
+  why       Where an entry comes from: rn-privacy why "Disk space" (or NSCameraUsageDescription, "Device ID", CAMERA, a package)
 
 ${c.bold('Options')}
   -p, --project <dir>       App folder (default: current folder)
@@ -46,7 +49,7 @@ ${c.bold('Options')}
       --strict              (audit, diff) Exit with code 1 when there is a problem or a change
       --suggest             (audit) Write a fixed PrivacyInfo.xcprivacy and an issue text for each library
       --base <file|ref>     (diff) Snapshot to compare with: a file, or a git ref such as origin/main
-  -f, --format <format>     md or json (report, scan, audit, check, diff). For report also:
+  -f, --format <format>     md or json (report, scan, audit, check, diff, why). For report also:
                               appstore   App Store Connect answers, step by step
                               inventory  what is collected, by whom and why, for your privacy policy
   -o, --out <file>          (report, play, snapshot) Write to a file instead of the terminal; (audit --suggest) folder
@@ -55,7 +58,7 @@ ${c.bold('Options')}
 
 ${c.bold('Also')}
   Expo plugin    Add "plugins": ["rn-privacy"] to app.json to update the manifest on every prebuild
-  GitHub Action  uses: yogesh2902/rn-privacy@v0.4.0 checks every pull request
+  GitHub Action  uses: yogesh2902/rn-privacy@v0.5.0 checks every pull request
   Your rules     rn-privacy.config.json describes in-house SDKs and data your app collects
   Docs           https://github.com/yogesh2902/rn-privacy
 `;
@@ -84,7 +87,7 @@ function main(argv: string[]): number {
 
   const command = positionals[0] ?? 'scan';
   const projectDir = path.resolve(values.project ?? process.cwd());
-  if (!['init', 'scan', 'ios', 'report', 'play', 'check', 'audit', 'snapshot', 'diff'].includes(command)) {
+  if (!['init', 'why', 'scan', 'ios', 'report', 'play', 'check', 'audit', 'snapshot', 'diff'].includes(command)) {
     console.error(`Unknown command "${command}".\n\n${HELP}`);
     return 2;
   }
@@ -118,6 +121,19 @@ function main(argv: string[]): number {
         for (const n of plan.next) print(`  ${n}`);
       }
       return 0;
+    }
+
+    case 'why': {
+      const query = positionals.slice(1).join(' ');
+      if (!query) {
+        console.error('Usage: rn-privacy why <api, Info.plist key, data type, Android permission, tracking domain or package>');
+        console.error('Examples: rn-privacy why "Disk space"   rn-privacy why NSCameraUsageDescription   rn-privacy why react-native-fs');
+        return 2;
+      }
+      const matches = explain(query, projectDir, scan, analysis);
+      if (values.format === 'json') print(JSON.stringify({ query, matches }, null, 2));
+      else print(formatWhy(query, matches, c));
+      return matches.length ? 0 : 1;
     }
 
     case 'scan':
@@ -182,6 +198,25 @@ function main(argv: string[]): number {
         if (scan.projectType === 'expo-prebuild') {
           print(c.dim('\nExpo prebuild regenerates the ios folder. Keep app.json as the source of truth.'));
         }
+        did = true;
+      }
+
+      // App extensions are separate bundles: each one needs its own manifest.
+      for (const ext of scan.extensions.filter((x) => x.apis.size)) {
+        const file = ext.manifest ?? path.join(projectDir, ext.dir, 'PrivacyInfo.xcprivacy');
+        const exists = !!ext.manifest;
+        const current = exists ? readManifest(file) : null;
+        const rel = path.relative(projectDir, file);
+        if (current && refuseInvalid(rel, current)) return 1;
+        const usages = [...ext.apis.keys()].map((category) => ({ category, reasons: [DEFAULT_REASONS[category].code] }));
+        const plan = planIosManifest({ file, exists, inXcodeProject: null }, usages, []);
+        print('');
+        report(`${rel}${exists ? '' : c.dim(' (new file)')}  ${c.dim(`extension ${ext.name}`)}`, plan.added, write);
+        if (write && (plan.added.length || !exists)) {
+          fs.writeFileSync(file, plan.content);
+          if (!exists) print(c.yellow(`Created ${rel}. In Xcode, add it to the ${ext.name} target (File > Add Files, tick only that target).`));
+        }
+        if (scan.projectType === 'expo-prebuild') print(c.dim('Expo prebuild regenerates this extension: make sure the config plugin that creates it also adds the manifest.'));
         did = true;
       }
 

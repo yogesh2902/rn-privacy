@@ -192,6 +192,27 @@ export interface PackageReport {
   unscannedBinaries: string[];
   /** Only in the iOS app (a CocoaPods pod or a Swift package), so not part of the Google Play answers. */
   iosOnly?: boolean;
+  /** Info.plist purpose strings the code needs (it asks for camera, location... access), with the evidence. */
+  purposeUses: Map<string, ApiEvidence[]>;
+  /** What the package is: an npm package (default), the app's own code, an Expo local module... */
+  origin?: 'app-code' | 'local-module';
+}
+
+/** An app extension (notification service, widget...): a separate bundle with its own manifest and Info.plist. */
+export interface ExtensionReport {
+  name: string;
+  /** Folder relative to the project, e.g. ios/NotificationService. */
+  dir: string;
+  /** NSExtensionPointIdentifier, e.g. com.apple.usernotifications.service. */
+  kind?: string;
+  /** Required reason APIs in the extension's own code, and in pods only it uses that ship no manifest. */
+  apis: Map<ApiCategory, { reasons: Set<string>; evidence: ApiEvidence[]; packages: Set<string> }>;
+  purposeUses: Map<string, ApiEvidence[]>;
+  /** The extension's PrivacyInfo.xcprivacy, if it has one. */
+  manifest: string | null;
+  infoPlist: string;
+  /** Pods the Podfile adds to this target. */
+  pods: string[];
 }
 
 export interface ManifestIssue {
@@ -214,6 +235,8 @@ export interface ScanResult {
   unusedRules: string[];
   /** Swift packages in Package.resolved that Xcode has not downloaded yet, so they were not scanned. */
   swiftPackagesNotDownloaded: string[];
+  /** App extensions in the ios folder. */
+  extensions: ExtensionReport[];
   /** The app's own Android permissions (manifest, app.json, merged manifest of the last build). */
   android: import('./android.js').AppAndroid;
 }
